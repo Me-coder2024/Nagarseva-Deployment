@@ -6,6 +6,5 @@ COPY microservices/requirements.txt /app/microservices/requirements.txt
 RUN pip install torch==2.9.1 torchvision==0.24.1 --index-url https://download.pytorch.org/whl/cpu && pip install -r microservices/requirements.txt
 COPY microservices /app/microservices
 COPY models /app/models
-COPY frontend/public/model/model.onnx /app/models/pothole.onnx
 WORKDIR /app/microservices
 CMD ["sh", "-c", "python prepare_models.py && exec uvicorn app:app --host 0.0.0.0 --port ${PORT:-7860} --workers 1"]
