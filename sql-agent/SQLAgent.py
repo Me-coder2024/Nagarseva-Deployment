@@ -4,7 +4,7 @@ from langchain_community.utilities import SQLDatabase
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langgraph.prebuilt import create_react_agent
 from langchain_groq import ChatGroq
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import make_url
 from prompt import GetPrompt
 
@@ -40,14 +40,26 @@ def load_database():
         # Prisma-only query options are not accepted by psycopg2.
         parsed = parsed.difference_update_query(["schema", "pgbouncer", "connection_limit", "pool_timeout"])
         engine = create_engine(parsed, pool_pre_ping=True, pool_size=2, max_overflow=1,
-            connect_args={"connect_timeout": 10, "options": "-c default_transaction_read_only=on -c statement_timeout=15000"})
+            connect_args={"connect_timeout": 10})
+
+        @event.listens_for(engine, "connect")
+        def set_connection_options(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("SET default_transaction_read_only = on;")
+                cursor.execute("SET statement_timeout = 15000;")
+            except Exception as opt_err:
+                print(f"Warning setting connection options: {opt_err}")
+            finally:
+                cursor.close()
+
         tables = [name.strip() for name in os.getenv("SQL_AGENT_TABLES", "Ward,Route,Issue,IssueAnalysis,IssueAssignment,IssueResolution,RouteAssignment,SurveySession").split(",") if name.strip()]
         db = SQLDatabase(engine, include_tables=tables, sample_rows_in_table_info=0)
         print(f"Database connected. Dialect: {db.dialect}")
         print(f"Available tables: {db.get_usable_table_names()}")
         return db
     except Exception as e:
-        print("Failed to initialize database. Check the read-only URL and migrated schema.")
+        print(f"Failed to initialize database: {e}")
         return None
 
 
