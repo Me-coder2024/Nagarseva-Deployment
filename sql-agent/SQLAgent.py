@@ -22,7 +22,7 @@ def load_model():
         model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
         api_key=key,
         timeout=60,
-        max_retries=1,
+        max_retries=3,
     )
     return model
 
