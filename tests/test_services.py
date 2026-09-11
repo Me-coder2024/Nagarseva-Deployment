@@ -40,15 +40,37 @@ class SQLTests(unittest.TestCase):
 
     def test_database_url_and_access_configuration(self):
         import SQLAgent
-        with patch.dict(os.environ, {'DATABASE_URL': 'postgres://reader:fake@localhost/db?sslmode=require&schema=public'}), patch.object(SQLAgent, 'create_engine') as create, patch.object(SQLAgent, 'SQLDatabase') as database:
+        callbacks = {}
+        def register(engine, event_name):
+            def decorate(callback):
+                callbacks[event_name] = callback
+                return callback
+            return decorate
+        with patch.dict(os.environ, {'DATABASE_URL': 'postgres://reader:fake@localhost/db?sslmode=require&schema=public'}), patch.object(SQLAgent, 'create_engine') as create, patch.object(SQLAgent, 'SQLDatabase') as database, patch.object(SQLAgent.event, 'listens_for', side_effect=register):
             SQLAgent.load_database()
             parsed = create.call_args.args[0]
             self.assertEqual(parsed.drivername, 'postgresql')
             self.assertNotIn('schema', parsed.query)
             self.assertEqual(parsed.query['sslmode'], 'require')
-            self.assertIn('default_transaction_read_only=on', create.call_args.kwargs['connect_args']['options'])
+            self.assertNotIn('options', create.call_args.kwargs['connect_args'])
+            connection = MagicMock()
+            callbacks['begin'](connection)
+            self.assertEqual([call.args[0] for call in connection.exec_driver_sql.call_args_list],
+                ['SET TRANSACTION READ ONLY', "SET LOCAL statement_timeout = '15s'"])
+            connection.exec_driver_sql.side_effect = RuntimeError('cannot enforce read-only')
+            with self.assertRaisesRegex(RuntimeError, 'cannot enforce read-only'):
+                callbacks['begin'](connection)
             self.assertNotIn('User', database.call_args.kwargs['include_tables'])
             self.assertEqual(database.call_args.kwargs['sample_rows_in_table_info'], 0)
+
+    def test_groq_model_default_and_override(self):
+        import SQLAgent
+        with patch.dict(os.environ, {'GROQ_API_KEY': 'test-key'}, clear=True), patch.object(SQLAgent, 'ChatGroq') as model:
+            SQLAgent.load_model()
+            self.assertEqual(model.call_args.kwargs['model'], 'openai/gpt-oss-120b')
+            os.environ['GROQ_MODEL'] = 'configured-model'
+            SQLAgent.load_model()
+            self.assertEqual(model.call_args.kwargs['model'], 'configured-model')
 
 class ModelTests(unittest.TestCase):
     def test_explicit_onnx_artifact_requires_matching_checksum(self):

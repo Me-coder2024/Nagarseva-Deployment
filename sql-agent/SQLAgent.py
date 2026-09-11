@@ -19,7 +19,7 @@ def load_model():
         print("ERROR: GROQ_API_KEY not set in environment.")
         return None
     model = ChatGroq(
-        model="llama-3.3-70b-versatile",
+        model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
         api_key=key,
         timeout=60,
         max_retries=1,
@@ -42,16 +42,12 @@ def load_database():
         engine = create_engine(parsed, pool_pre_ping=True, pool_size=2, max_overflow=1,
             connect_args={"connect_timeout": 10})
 
-        @event.listens_for(engine, "connect")
-        def set_connection_options(dbapi_connection, connection_record):
-            cursor = dbapi_connection.cursor()
-            try:
-                cursor.execute("SET default_transaction_read_only = on;")
-                cursor.execute("SET statement_timeout = 15000;")
-            except Exception as opt_err:
-                print(f"Warning setting connection options: {opt_err}")
-            finally:
-                cursor.close()
+        @event.listens_for(engine, "begin")
+        def set_transaction_options(connection):
+            # Apply per transaction: connection initialization rolls back SETs,
+            # and transaction poolers can hand us another server connection.
+            connection.exec_driver_sql("SET TRANSACTION READ ONLY")
+            connection.exec_driver_sql("SET LOCAL statement_timeout = '15s'")
 
         tables = [name.strip() for name in os.getenv("SQL_AGENT_TABLES", "Ward,Route,Issue,IssueAnalysis,IssueAssignment,IssueResolution,RouteAssignment,SurveySession").split(",") if name.strip()]
         db = SQLDatabase(engine, include_tables=tables, sample_rows_in_table_info=0)
