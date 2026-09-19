@@ -284,10 +284,6 @@ class ApiService {
         if (capturedAt) {
             formData.append('capturedAt', capturedAt);
         }
-        if (photoData) {
-            formData.append('photoData', photoData);
-        }
-
         const cleanUri = photoUri.startsWith('file://')
             ? photoUri
             : photoUri.startsWith('/')
@@ -296,12 +292,16 @@ class ApiService {
 
         formData.append('photoUri', cleanUri);
 
-        if (cleanUri && !cleanUri.startsWith('http') && !cleanUri.startsWith('data:')) {
+        const isFileUri = cleanUri && !cleanUri.startsWith('http') && !cleanUri.startsWith('data:');
+        if (isFileUri) {
             formData.append('photo', {
                 uri: cleanUri,
                 name: `pothole_${Date.now()}.jpg`,
                 type: 'image/jpeg',
             } as any);
+        } else if (photoData) {
+            // Only send photoData if no local file URI is present
+            formData.append('photoData', photoData);
         }
 
         for (const url of urlsToTry) {

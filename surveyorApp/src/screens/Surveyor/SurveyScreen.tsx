@@ -779,7 +779,9 @@ export default function SurveyScreen() {
                 mediaType: 'photo',
                 selectionLimit: 0,
                 quality: 0.8,
-                includeBase64: true,
+                maxWidth: 1280,
+                maxHeight: 1280,
+                includeBase64: false,
             });
 
             if (result.didCancel || !result.assets || result.assets.length === 0) {
@@ -812,7 +814,6 @@ export default function SurveyScreen() {
             const newPickedPhotos: ReviewPhoto[] = result.assets.map((asset, index) => ({
                 id: Date.now().toString() + index,
                 uri: asset.uri || '',
-                base64: asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : undefined,
                 latitude: lat,
                 longitude: lon,
                 accuracy: gpsSnapshot.accuracy,
@@ -827,15 +828,10 @@ export default function SurveyScreen() {
                     return updated;
                 });
                 setIssuesDetected(prev => prev + newPickedPhotos.length);
-                setShowReviewScreen(true);
-                Alert.alert(
-                    '✅ Photos Imported',
-                    `Successfully imported ${newPickedPhotos.length} photo(s) from your device gallery. Tap "Upload to Admin" to send them now.`
-                );
             }
-        } catch (err) {
-            console.error('Gallery pick error:', err);
-            Alert.alert('Error', 'Failed to pick photos from gallery.');
+        } catch (error) {
+            console.error('Gallery picker error:', error);
+            Alert.alert('Error', 'Failed to pick photos from gallery');
         }
     };
 
@@ -852,10 +848,12 @@ export default function SurveyScreen() {
             const targetRouteId = assignment.routeId || assignment.route?.id || 'route-1';
             const targetSessionId = surveySessionId || '';
 
-            const results = await Promise.all(
-                reviewPhotos.map(photo => {
-                    console.log(`[UPLOAD] lat=${photo.latitude.toFixed(6)} lng=${photo.longitude.toFixed(6)}`);
-                    return api.reportDetection(
+            const results: any[] = [];
+            for (let i = 0; i < reviewPhotos.length; i++) {
+                const photo = reviewPhotos[i];
+                console.log(`[UPLOAD ${i + 1}/${reviewPhotos.length}] lat=${photo.latitude.toFixed(6)} lng=${photo.longitude.toFixed(6)}`);
+                try {
+                    const res = await api.reportDetection(
                         photo.uri,
                         targetRouteId,
                         targetWardId,
@@ -864,16 +862,17 @@ export default function SurveyScreen() {
                         photo.latitude,
                         photo.longitude,
                         0.90,
-                        photo.base64,
+                        undefined, // Do NOT send massive base64 text
                         photo.accuracy,
                         photo.capturedAt,
                         photo.id  // photo.id IS the detectionId generated at capture time
-                    ).catch(err => {
-                        console.error('Single photo upload error:', err);
-                        return { success: false };
-                    });
-                })
-            );
+                    );
+                    results.push(res);
+                } catch (err: any) {
+                    console.error(`Photo ${i + 1} upload error:`, err);
+                    results.push({ success: false, message: err?.message || 'Upload failed' });
+                }
+            }
 
             const successCount = results.filter(res => res && res.success).length;
             const lastFailure = results.find(res => res && !res.success);
