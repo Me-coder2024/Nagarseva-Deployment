@@ -227,6 +227,7 @@ const styles = StyleSheet.create({
     scrollContent: {
         padding: spacing.lg,
         gap: spacing.md,
+        paddingBottom: 140,
     },
     statusCard: {
         flexDirection: 'row',

@@ -205,7 +205,7 @@ export default function DashboardScreen() {
         return (
             <View style={styles.container}>
                 <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
-                <View style={[styles.headerBg, { paddingTop: insets.top }]} />
+                <View style={[styles.headerHero, { paddingTop: insets.top, height: 120 }]} />
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={colors.primary} />
                 </View>
@@ -213,47 +213,46 @@ export default function DashboardScreen() {
         );
     }
 
-    return (
-        <View style={styles.container}>
-            <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
-            <View style={[styles.headerBg, { paddingTop: insets.top, height: 260 }]} />
+    const renderHeader = () => (
+        <View style={styles.headerWrapper}>
+            <View style={[styles.headerHero, { paddingTop: insets.top + spacing.sm }]}>
+                <View style={styles.headerContent}>
+                    <View style={styles.userSection}>
+                        <View style={styles.avatar}>
+                            <Text style={styles.avatarText}>{user?.name?.charAt(0).toUpperCase() || 'S'}</Text>
+                        </View>
+                        <View>
+                            <Text style={styles.greeting}>Good morning,</Text>
+                            <Text style={styles.userName}>{user?.name || 'Surveyor'}</Text>
+                        </View>
+                    </View>
+                    <TouchableOpacity style={styles.logoutButton} onPress={logout}>
+                        <Text style={styles.logoutText}>Logout</Text>
+                    </TouchableOpacity>
+                </View>
 
-            <View style={[styles.headerContent, { paddingTop: insets.top + spacing.md }]}>
-                <View style={styles.userSection}>
-                    <View style={styles.avatar}>
-                        <Text style={styles.avatarText}>{user?.name?.charAt(0).toUpperCase() || 'S'}</Text>
+                <View style={styles.statsContainer}>
+                    <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
+                        <View style={[styles.statIconBg, { backgroundColor: colors.pendingBg }]}>
+                            <Text style={styles.statIcon}>⏳</Text>
+                        </View>
+                        <Text style={styles.statNumber}>{stats.pending}</Text>
+                        <Text style={styles.statLabel}>Pending</Text>
                     </View>
-                    <View>
-                        <Text style={styles.greeting}>Good morning,</Text>
-                        <Text style={styles.userName}>{user?.name || 'Surveyor'}</Text>
+                    <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
+                        <View style={[styles.statIconBg, { backgroundColor: colors.activeBg }]}>
+                            <Text style={styles.statIcon}>🚀</Text>
+                        </View>
+                        <Text style={styles.statNumber}>{stats.active}</Text>
+                        <Text style={styles.statLabel}>Active</Text>
                     </View>
-                </View>
-                <TouchableOpacity style={styles.logoutButton} onPress={logout}>
-                    <Text style={styles.logoutText}>Logout</Text>
-                </TouchableOpacity>
-            </View>
-
-            <View style={styles.statsContainer}>
-                <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
-                    <View style={[styles.statIconBg, { backgroundColor: colors.pendingBg }]}>
-                        <Text style={styles.statIcon}>⏳</Text>
+                    <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
+                        <View style={[styles.statIconBg, { backgroundColor: colors.completedBg }]}>
+                            <Text style={styles.statIcon}>✅</Text>
+                        </View>
+                        <Text style={styles.statNumber}>{stats.completed}</Text>
+                        <Text style={styles.statLabel}>Completed</Text>
                     </View>
-                    <Text style={styles.statNumber}>{stats.pending}</Text>
-                    <Text style={styles.statLabel}>Pending</Text>
-                </View>
-                <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
-                    <View style={[styles.statIconBg, { backgroundColor: colors.activeBg }]}>
-                        <Text style={styles.statIcon}>🚀</Text>
-                    </View>
-                    <Text style={styles.statNumber}>{stats.active}</Text>
-                    <Text style={styles.statLabel}>Active</Text>
-                </View>
-                <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
-                    <View style={[styles.statIconBg, { backgroundColor: colors.completedBg }]}>
-                        <Text style={styles.statIcon}>✅</Text>
-                    </View>
-                    <Text style={styles.statNumber}>{stats.completed}</Text>
-                    <Text style={styles.statLabel}>Completed</Text>
                 </View>
             </View>
 
@@ -303,11 +302,17 @@ export default function DashboardScreen() {
                     </TouchableOpacity>
                 ))}
             </View>
+        </View>
+    );
 
+    return (
+        <View style={styles.container}>
+            <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
             <FlatList
                 data={filteredAssignments}
                 keyExtractor={item => item.id}
                 renderItem={renderAssignment}
+                ListHeaderComponent={renderHeader}
                 style={{ flex: 1 }}
                 contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(insets.bottom + 60, 90) }]}
                 showsVerticalScrollIndicator={false}
@@ -346,14 +351,14 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: colors.background,
     },
-    headerBg: {
+    headerWrapper: {
+        marginBottom: spacing.md,
+    },
+    headerHero: {
         backgroundColor: colors.primary,
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
         borderBottomLeftRadius: borderRadius.xxl,
         borderBottomRightRadius: borderRadius.xxl,
+        paddingBottom: spacing.lg,
         ...shadows.md,
     },
     headerContent: {
@@ -361,7 +366,7 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'flex-start',
         paddingHorizontal: spacing.lg,
-        paddingBottom: spacing.lg,
+        paddingBottom: spacing.sm,
     },
     userSection: {
         flexDirection: 'row',

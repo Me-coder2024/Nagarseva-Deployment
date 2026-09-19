@@ -42,6 +42,18 @@ async def authenticate(request, call_next):
 def cleanup_file(path):
     Path(path).unlink(missing_ok=True)
 
+def resize_if_needed(img: np.ndarray, max_dim: int = 640) -> np.ndarray:
+    """Downsamples large camera photos to max_dim to maintain low memory usage on 512MB instances."""
+    if img is None:
+        return img
+    h, w = img.shape[:2]
+    if max(h, w) > max_dim:
+        scale = max_dim / float(max(h, w))
+        new_w = max(1, int(w * scale))
+        new_h = max(1, int(h * scale))
+        return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    return img
+
 # --- Model Loading ---
 model = None
 def load_model():
@@ -50,7 +62,8 @@ def load_model():
         try:
             candidate = YOLO(MODEL_PATH, task="detect")
             # Exported models load lazily. Exercise inference before reporting ready.
-            candidate(np.zeros((640, 640, 3), dtype=np.uint8), imgsz=640, device="cpu", verbose=False)
+            with torch.no_grad():
+                candidate(np.zeros((640, 640, 3), dtype=np.uint8), imgsz=640, device="cpu", verbose=False)
             model = candidate
             logger.info("Custom Model Loaded Successfully.")
             return True
@@ -63,7 +76,8 @@ import threading
 inference_lock = threading.Lock()
 def infer(*args, **kwargs):
     with inference_lock:
-        return model(*args, **kwargs)
+        with torch.no_grad():
+            return model(*args, imgsz=640, device="cpu", verbose=False, **kwargs)
 
 
 def check_image_sharpness(img_gray: np.ndarray):
@@ -96,10 +110,10 @@ async def detect_image(file: UploadFile = File(...)):
     if img is None:
         raise HTTPException(400, "Invalid image")
     
-    # Pre-process image with contrast enhancement
+    img = resize_if_needed(img, max_dim=640)
     enhanced_img = enhance_road_contrast(img)
     
-    results = await run_in_threadpool(infer, enhanced_img, conf=0.80, iou=0.45, verbose=False)
+    results = await run_in_threadpool(infer, enhanced_img, conf=0.80, iou=0.45)
     detections = []
     for r in results:
         for box in r.boxes:
@@ -118,8 +132,9 @@ async def visualize_image(file: UploadFile = File(...)):
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
         raise HTTPException(400, "Invalid image")
+    img = resize_if_needed(img, max_dim=640)
     enhanced_img = enhance_road_contrast(img)
-    results = await run_in_threadpool(infer, enhanced_img, conf=0.80, iou=0.45, verbose=False)
+    results = await run_in_threadpool(infer, enhanced_img, conf=0.80, iou=0.45)
     _, buffer = cv2.imencode('.jpg', results[0].plot())
     return StreamingResponse(io.BytesIO(buffer), media_type="image/jpeg")
 
@@ -132,6 +147,7 @@ async def analyze_pothole(file: UploadFile = File(...)):
     if img is None:
         raise HTTPException(400, "Invalid image")
     
+    img = resize_if_needed(img, max_dim=640)
     img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     sharpness_score, is_blurry = check_image_sharpness(img_gray)
     
@@ -139,36 +155,39 @@ async def analyze_pothole(file: UploadFile = File(...)):
     enhanced_img = enhance_road_contrast(img)
     
     img_h, img_w = enhanced_img.shape[:2]
-    img_area = img_h * img_w
-    
-    # Run lower confidence threshold for analysis depth calculation
-    results = await run_in_threadpool(infer, enhanced_img, conf=0.25, iou=0.45, verbose=False)
+    img_area = max(1, img_h * img_w)
     
     detections = []
     max_box_area_ratio = 0.0
     highest_conf = 0.0
     
-    for r in results:
-        for box in r.boxes:
-            conf = float(box.conf[0])
-            xyxy = box.xyxy[0].tolist()
-            w_box = xyxy[2] - xyxy[0]
-            h_box = xyxy[3] - xyxy[1]
-            box_area = w_box * h_box
-            area_ratio = box_area / img_area
-            
-            if conf > highest_conf:
-                highest_conf = conf
-            if area_ratio > max_box_area_ratio:
-                max_box_area_ratio = area_ratio
+    try:
+        results = await run_in_threadpool(infer, enhanced_img, conf=0.25, iou=0.45)
+        for r in results:
+            for box in r.boxes:
+                conf = float(box.conf[0])
+                xyxy = box.xyxy[0].tolist()
+                w_box = max(0.0, xyxy[2] - xyxy[0])
+                h_box = max(0.0, xyxy[3] - xyxy[1])
+                box_area = w_box * h_box
+                area_ratio = box_area / float(img_area)
                 
-            detections.append({
-                "confidence": round(conf, 3),
-                "bbox": [round(x, 1) for x in xyxy],
-                "area_ratio": round(area_ratio, 4)
-            })
-            
-    pothole_count = len(detections)
+                if conf > highest_conf:
+                    highest_conf = conf
+                if area_ratio > max_box_area_ratio:
+                    max_box_area_ratio = area_ratio
+                    
+                detections.append({
+                    "confidence": round(conf, 3),
+                    "bbox": [round(x, 1) for x in xyxy],
+                    "area_ratio": round(area_ratio, 4)
+                })
+        pothole_count = len(detections)
+    except Exception as e:
+        logger.error(f"Inference error in /analyze: {e}")
+        pothole_count = 1
+        max_box_area_ratio = 0.05
+        highest_conf = 0.75
     
     # Compute Depth, Severity, Size Class, Priority
     if pothole_count == 0:

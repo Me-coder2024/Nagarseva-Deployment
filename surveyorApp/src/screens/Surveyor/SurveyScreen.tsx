@@ -4,6 +4,7 @@ import {
     Text,
     StyleSheet,
     FlatList,
+    ScrollView,
     Image,
     Alert,
     PermissionsAndroid,
@@ -1436,7 +1437,11 @@ export default function SurveyScreen() {
                 onBack={() => navigation.goBack()}
             />
 
-            <View style={styles.content}>
+            <ScrollView
+                style={styles.container}
+                contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom + 140, 160) }]}
+                showsVerticalScrollIndicator={false}
+            >
                 {/* Route Info Card */}
                 <Card>
                     <Text style={styles.sectionTitle}>Survey Details</Text>
@@ -1488,10 +1493,10 @@ export default function SurveyScreen() {
                         Issues will be detected automatically by our AI system.
                     </Text>
                 </Card>
-            </View>
+            </ScrollView>
 
             {/* Action Buttons */}
-            <View style={styles.footer}>
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom + spacing.md, 24) }]}>
                 <Button
                     title="Start Survey"
                     onPress={handleStartSurvey}
