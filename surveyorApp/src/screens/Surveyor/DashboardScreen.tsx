@@ -38,12 +38,36 @@ export default function DashboardScreen() {
 
     const [offlineCount, setOfflineCount] = useState<number>(0);
     const [isSyncing, setIsSyncing] = useState<boolean>(false);
+    const [activeUpload, setActiveUpload] = useState<{
+        assignmentId: string;
+        routeName: string;
+        total: number;
+        surveySessionId: string;
+        startedAt: string;
+        isCompleted?: boolean;
+    } | null>(null);
 
     const fadeAnim = useRef(new Animated.Value(0)).current;
+
+    const checkActiveUpload = useCallback(async () => {
+        try {
+            const raw = await AsyncStorage.getItem('@nagarseva_active_survey_upload');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                setActiveUpload(parsed);
+            } else {
+                setActiveUpload(null);
+            }
+        } catch (e) {
+            console.error('Failed to load active survey upload state', e);
+        }
+    }, []);
 
     const performSync = useCallback(async () => {
         const count = await offlineQueue.getTotalPendingPhotosCount();
         setOfflineCount(count);
+        checkActiveUpload();
+
         if (count > 0 && !offlineQueue.isQueuePaused()) {
             setIsSyncing(true);
             try {
@@ -87,7 +111,7 @@ export default function DashboardScreen() {
                 setOfflineCount(remaining);
             }
         }
-    }, []);
+    }, [checkActiveUpload]);
 
     const handleManualSync = async () => {
         setIsSyncing(true);
@@ -130,6 +154,7 @@ export default function DashboardScreen() {
 
             const remaining = await offlineQueue.getTotalPendingPhotosCount();
             setOfflineCount(remaining);
+            checkActiveUpload();
 
             if (res.synced > 0) {
                 Alert.alert(
@@ -154,10 +179,37 @@ export default function DashboardScreen() {
         }
     };
 
+    // Auto-complete survey when active upload photos reach 0
+    useEffect(() => {
+        if (activeUpload && !activeUpload.isCompleted && offlineCount === 0) {
+            if (activeUpload.surveySessionId) {
+                api.endSurvey(activeUpload.surveySessionId, new Date().toISOString()).catch(console.warn);
+            }
+            AsyncStorage.setItem(`@nagarseva_completed_${activeUpload.assignmentId}`, 'true').catch(console.warn);
+
+            const completed = { ...activeUpload, isCompleted: true };
+            setActiveUpload(completed);
+            AsyncStorage.setItem('@nagarseva_active_survey_upload', JSON.stringify(completed)).catch(console.warn);
+
+            loadAssignments();
+
+            Alert.alert(
+                '🎉 Survey Complete!',
+                `All ${activeUpload.total} photos for "${activeUpload.routeName}" have been successfully uploaded to Admin.`
+            );
+        }
+    }, [activeUpload, offlineCount, loadAssignments]);
+
+    const handleDismissUploadCard = async () => {
+        await AsyncStorage.removeItem('@nagarseva_active_survey_upload');
+        setActiveUpload(null);
+    };
+
     // Subscribe to queue changes and keep syncing in background
     useEffect(() => {
         const unsubscribe = offlineQueue.subscribe((count) => {
             setOfflineCount(count);
+            checkActiveUpload();
         });
 
         performSync();
@@ -167,13 +219,14 @@ export default function DashboardScreen() {
             unsubscribe();
             clearInterval(syncInterval);
         };
-    }, [performSync]);
+    }, [performSync, checkActiveUpload]);
 
     useFocusEffect(
         useCallback(() => {
             loadAssignments();
             performSync();
-        }, [user?.id, performSync])
+            checkActiveUpload();
+        }, [user?.id, performSync, checkActiveUpload])
     );
 
     useEffect(() => {
@@ -340,8 +393,79 @@ export default function DashboardScreen() {
                 </View>
             </View>
 
-            {/* Background Cloud Sync Status Banner */}
-            {offlineCount > 0 ? (
+            {/* Live Survey Upload Progress Card or Background Cloud Sync Status Banner */}
+            {activeUpload && !activeUpload.isCompleted && (
+                <View style={styles.activeUploadCard}>
+                    <View style={styles.activeUploadHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                            {isSyncing ? (
+                                <ActivityIndicator size="small" color="#2563EB" style={{ marginRight: spacing.sm }} />
+                            ) : (
+                                <Text style={styles.activeUploadIcon}>📤</Text>
+                            )}
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.activeUploadTitle}>
+                                    {isSyncing ? 'Uploading Survey Photos...' : 'Survey Upload Queued'}
+                                </Text>
+                                <Text style={styles.activeUploadRoute} numberOfLines={1}>
+                                    📍 {activeUpload.routeName}
+                                </Text>
+                            </View>
+                        </View>
+                        <TouchableOpacity
+                            style={styles.activeSyncButton}
+                            onPress={handleManualSync}
+                            disabled={isSyncing}
+                        >
+                            <Text style={styles.activeSyncButtonText}>{isSyncing ? 'Syncing...' : '⚡ Sync Now'}</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Progress Bar */}
+                    <View style={styles.uploadProgressTrack}>
+                        <View
+                            style={[
+                                styles.uploadProgressFill,
+                                {
+                                    width: `${Math.min(
+                                        100,
+                                        Math.max(5, Math.round(((Math.max(0, activeUpload.total - offlineCount)) / (activeUpload.total || 1)) * 100))
+                                    )}%`,
+                                },
+                            ]}
+                        />
+                    </View>
+
+                    {/* Counter Text */}
+                    <View style={styles.uploadCountRow}>
+                        <Text style={styles.uploadCountText}>
+                            ✅ Uploaded {Math.max(0, activeUpload.total - offlineCount)} of {activeUpload.total} photos
+                        </Text>
+                        <Text style={styles.uploadRemainingText}>
+                            ⏳ {offlineCount} remaining
+                        </Text>
+                    </View>
+                </View>
+            )}
+
+            {activeUpload && activeUpload.isCompleted && (
+                <View style={styles.activeCompletedCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                        <Text style={{ fontSize: 24, marginRight: spacing.sm }}>🎉</Text>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.completedCardTitle}>Survey Completed & Uploaded!</Text>
+                            <Text style={styles.completedCardSubtitle}>
+                                All {activeUpload.total} photos for "{activeUpload.routeName}" are live on Admin Dashboard.
+                            </Text>
+                        </View>
+                    </View>
+                    <TouchableOpacity style={styles.dismissButton} onPress={handleDismissUploadCard}>
+                        <Text style={styles.dismissButtonText}>✕</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
+
+            {!activeUpload && offlineCount > 0 && (
                 <View style={styles.syncBanner}>
                     <View style={styles.syncLeft}>
                         {isSyncing ? (
@@ -366,7 +490,9 @@ export default function DashboardScreen() {
                         <Text style={styles.syncButtonText}>{isSyncing ? 'Syncing...' : 'Sync Now'}</Text>
                     </TouchableOpacity>
                 </View>
-            ) : (
+            )}
+
+            {!activeUpload && offlineCount === 0 && (
                 <View style={styles.syncedBanner}>
                     <Text style={styles.syncedIcon}>☁️</Text>
                     <Text style={styles.syncedText}>Cloud Sync Active • All photos & survey data uploaded</Text>
@@ -753,5 +879,114 @@ const styles = StyleSheet.create({
         ...typography.small,
         color: '#065F46',
         fontWeight: '600',
+    },
+    activeUploadCard: {
+        backgroundColor: '#EFF6FF',
+        borderWidth: 1.5,
+        borderColor: '#3B82F6',
+        borderRadius: borderRadius.xl,
+        padding: spacing.md,
+        marginHorizontal: spacing.lg,
+        marginTop: spacing.md,
+        ...shadows.md,
+    },
+    activeUploadHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: spacing.sm,
+    },
+    activeUploadIcon: {
+        fontSize: 22,
+        marginRight: spacing.sm,
+    },
+    activeUploadTitle: {
+        ...typography.caption,
+        fontWeight: '800',
+        color: '#1E40AF',
+        fontSize: 14,
+    },
+    activeUploadRoute: {
+        ...typography.small,
+        color: '#3B82F6',
+        fontWeight: '600',
+        marginTop: 2,
+    },
+    activeSyncButton: {
+        backgroundColor: '#2563EB',
+        paddingHorizontal: spacing.md,
+        paddingVertical: 7,
+        borderRadius: borderRadius.md,
+    },
+    activeSyncButtonText: {
+        ...typography.small,
+        color: '#FFFFFF',
+        fontWeight: '700',
+    },
+    uploadProgressTrack: {
+        height: 10,
+        backgroundColor: '#DBEAFE',
+        borderRadius: 5,
+        overflow: 'hidden',
+        marginVertical: spacing.xs,
+    },
+    uploadProgressFill: {
+        height: '100%',
+        backgroundColor: '#2563EB',
+        borderRadius: 5,
+    },
+    uploadCountRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: spacing.xs,
+    },
+    uploadCountText: {
+        ...typography.small,
+        color: '#1E40AF',
+        fontWeight: '700',
+    },
+    uploadRemainingText: {
+        ...typography.small,
+        color: '#D97706',
+        fontWeight: '700',
+    },
+    activeCompletedCard: {
+        backgroundColor: '#ECFDF5',
+        borderWidth: 1.5,
+        borderColor: '#10B981',
+        borderRadius: borderRadius.xl,
+        padding: spacing.md,
+        marginHorizontal: spacing.lg,
+        marginTop: spacing.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        ...shadows.md,
+    },
+    completedCardTitle: {
+        ...typography.caption,
+        fontWeight: '800',
+        color: '#065F46',
+        fontSize: 14,
+    },
+    completedCardSubtitle: {
+        ...typography.small,
+        color: '#047857',
+        marginTop: 2,
+    },
+    dismissButton: {
+        backgroundColor: '#D1FAE5',
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginLeft: spacing.sm,
+    },
+    dismissButtonText: {
+        color: '#065F46',
+        fontWeight: '700',
+        fontSize: 14,
     },
 });

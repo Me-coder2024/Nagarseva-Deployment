@@ -96,14 +96,6 @@ export default function SurveyScreen() {
                     console.error('Failed to parse saved review photos', e);
                 }
             }
-
-            // If pickFromGallery param is passed, open gallery immediately
-            if (route.params && (route.params as any).pickFromGallery) {
-                setShowReviewScreen(true);
-                setTimeout(() => {
-                    handlePickPhotosFromGallery();
-                }, 300);
-            }
         });
     }, [assignment.id, assignment.route?.name]);
 
@@ -753,71 +745,9 @@ export default function SurveyScreen() {
         );
     };
 
-    const handlePickPhotosFromGallery = async () => {
-        try {
-            const result = await launchImageLibrary({
-                mediaType: 'photo',
-                selectionLimit: 0,
-                quality: 0.8,
-                maxWidth: 1280,
-                maxHeight: 1280,
-                includeBase64: false,
-            });
-
-            if (result.didCancel || !result.assets || result.assets.length === 0) {
-                return;
-            }
-
-            // CRITICAL: Always request fresh GPS for gallery import
-            // DO NOT use cached GPS - each imported photo should get current GPS
-            console.log('[GALLERY IMPORT] Requesting fresh GPS for imported photos...');
-            const gpsSnapshot = await getLiveCoordinates();
-            const lat = gpsSnapshot?.latitude;
-            const lon = gpsSnapshot?.longitude;
-
-            if (!lat || !lon) {
-                Alert.alert(
-                    '⚠️ GPS Lock Required',
-                    'Could not determine live device GPS coordinates. Please ensure Location services are turned ON and try again.'
-                );
-                return;
-            }
-
-            if (gpsSnapshot.accuracy && gpsSnapshot.accuracy > MAX_ACCEPTABLE_GPS_ACCURACY) {
-                Alert.alert(
-                    '⚠️ Weak GPS Signal',
-                    `Current GPS accuracy is ±${Math.round(gpsSnapshot.accuracy)}m (threshold: ±${MAX_ACCEPTABLE_GPS_ACCURACY}m). Please move to an open area before importing.`
-                );
-                return;
-            }
-
-            const newPickedPhotos: ReviewPhoto[] = result.assets.map((asset, index) => ({
-                id: Date.now().toString() + index,
-                uri: asset.uri || '',
-                latitude: lat,
-                longitude: lon,
-                accuracy: gpsSnapshot.accuracy,
-                capturedAt: gpsSnapshot.capturedAt || new Date().toISOString(),
-                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            })).filter(p => p.uri);
-
-            if (newPickedPhotos.length > 0) {
-                setReviewPhotos(prev => {
-                    const updated = [...prev, ...newPickedPhotos];
-                    AsyncStorage.setItem(REVIEW_PHOTOS_KEY, JSON.stringify(updated)).catch(console.error);
-                    return updated;
-                });
-                setIssuesDetected(prev => prev + newPickedPhotos.length);
-            }
-        } catch (error) {
-            console.error('Gallery picker error:', error);
-            Alert.alert('Error', 'Failed to pick photos from gallery');
-        }
-    };
-
     const handleUploadApprovedPhotos = async () => {
         if (reviewPhotos.length === 0) {
-            Alert.alert('No Photos', 'Please capture at least one photo before uploading to Admin.');
+            Alert.alert('No Photos', 'Please capture at least one photo before uploading.');
             return;
         }
 
@@ -826,65 +756,49 @@ export default function SurveyScreen() {
         try {
             const targetWardId = assignment.route?.wardId || assignment.route?.ward?.id || 'ward-1';
             const targetRouteId = assignment.routeId || assignment.route?.id || 'route-1';
-            const targetSessionId = surveySessionId || '';
+            const targetSessionId = surveySessionId || `session-${Date.now()}`;
+            const photoCount = reviewPhotos.length;
 
-            const results: any[] = [];
-            for (let i = 0; i < reviewPhotos.length; i++) {
-                const photo = reviewPhotos[i];
-                console.log(`[UPLOAD ${i + 1}/${reviewPhotos.length}] lat=${photo.latitude.toFixed(6)} lng=${photo.longitude.toFixed(6)}`);
-                try {
-                    const res = await api.reportDetection(
-                        photo.uri,
-                        targetRouteId,
-                        targetWardId,
-                        targetSessionId,
-                        assignment.id,
-                        photo.latitude,
-                        photo.longitude,
-                        0.90,
-                        undefined, // Do NOT send massive base64 text
-                        photo.accuracy,
-                        photo.capturedAt,
-                        photo.id  // photo.id IS the detectionId generated at capture time
-                    );
-                    results.push(res);
-                } catch (err: any) {
-                    console.error(`Photo ${i + 1} upload error:`, err);
-                    results.push({ success: false, message: err?.message || 'Upload failed' });
-                }
-            }
+            // Enqueue all photos into offline queue for seamless background upload
+            await offlineQueue.enqueuePhotos(
+                reviewPhotos,
+                targetRouteId,
+                targetWardId,
+                targetSessionId,
+                assignment.id
+            );
 
-            const successCount = results.filter(res => res && res.success).length;
-            const lastFailure = results.find(res => res && !res.success);
+            // Save active survey upload tracking state for Dashboard live progress card
+            await AsyncStorage.setItem('@nagarseva_active_survey_upload', JSON.stringify({
+                assignmentId: assignment.id,
+                routeName: assignment.route?.name || 'Survey Route',
+                total: photoCount,
+                surveySessionId: targetSessionId,
+                startedAt: surveyStartTime?.toISOString() || new Date().toISOString(),
+                isCompleted: false,
+            }));
 
-            if (successCount === 0) {
-                const errorMsg = (lastFailure && 'message' in lastFailure) ? lastFailure.message : 'Unknown error. Check Metro logs for details.';
-                Alert.alert(
-                    '⚠️ Upload Failed',
-                    `Could not upload photo(s) to Admin server.\n\nReason: ${errorMsg}`
-                );
-                return;
-            }
+            // Clear review photos from AsyncStorage
+            await AsyncStorage.removeItem(REVIEW_PHOTOS_KEY);
+            setReviewPhotos([]);
+            stopCapturing();
+            setShowReviewScreen(false);
 
             Alert.alert(
-                '✅ Sent to Admin Dashboard!',
-                `Successfully uploaded ${successCount} of ${reviewPhotos.length} photo(s) along with latitude & longitude coordinates to Admin. All issues are now visible on Admin Dashboard!`,
+                '📤 Uploading Survey Photos',
+                `Queued ${photoCount} photo(s) for background upload. Returning to Dashboard to track progress.`,
                 [
                     {
-                        text: 'OK',
+                        text: 'View Dashboard Progress',
                         onPress: () => {
-                            setReviewPhotos([]);
-                            AsyncStorage.removeItem(REVIEW_PHOTOS_KEY).catch(console.error);
-                            AsyncStorage.setItem(`@nagarseva_completed_${assignment.id}`, 'true').catch(console.error);
-                            setShowReviewScreen(false);
-                            handleEndSurvey();
+                            navigation.popToTop();
                         },
                     },
                 ]
             );
-        } catch (err) {
-            console.error('Upload error:', err);
-            Alert.alert('Error', 'Failed to upload photos to Admin. Please check network connection.');
+        } catch (err: any) {
+            console.error('Upload queueing error:', err);
+            Alert.alert('Error', 'Failed to queue photos for upload. Please try again.');
         } finally {
             setIsUploadingApproved(false);
         }
@@ -1145,26 +1059,20 @@ export default function SurveyScreen() {
                     <Card style={{ marginBottom: spacing.md }}>
                         <Text style={styles.sectionTitle}>📋 Survey Photos Queue</Text>
                         <Text style={styles.infoLabel}>
-                            Review captured images with GPS coordinates. Delete improper photos before sending to Admin.
+                            Review captured images with GPS coordinates. Delete improper photos before queueing for upload.
                         </Text>
-                        <Button
-                            title="📁 Import Photos from Gallery"
-                            onPress={handlePickPhotosFromGallery}
-                            variant="secondary"
-                            style={{ marginTop: spacing.sm, height: 42 }}
-                        />
                     </Card>
 
                     {reviewPhotos.length === 0 ? (
                         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl }}>
                             <Text style={{ fontSize: 48, marginBottom: spacing.sm }}>📸</Text>
-                            <Text style={styles.emptyText}>No photos in queue.</Text>
+                            <Text style={styles.emptyText}>No photos captured yet.</Text>
                             <Text style={[styles.infoLabel, { textAlign: 'center', marginTop: spacing.xs, marginBottom: spacing.lg }]}>
-                                You can capture photos during live survey or select photos from device gallery.
+                                Return to live camera to capture road photos.
                             </Text>
                             <Button
-                                title="📁 Select Photos from Gallery"
-                                onPress={handlePickPhotosFromGallery}
+                                title="📸 Return to Camera"
+                                onPress={() => setShowReviewScreen(false)}
                                 variant="primary"
                             />
                         </View>
@@ -1316,89 +1224,90 @@ export default function SurveyScreen() {
                             </View>
                         )}
 
-                        <View style={{ flexDirection: 'row', gap: spacing.md, alignItems: 'center' }}>
+                        <View style={styles.statusPillsContainer}>
                             {cameraRunning && (
                                 <View style={styles.recordingBadge}>
                                     <View style={styles.recordingDot} />
-                                    <Text style={styles.recordingText}>RECORDING</Text>
+                                    <Text style={styles.recordingText}>LIVE SURVEY</Text>
                                 </View>
                             )}
                             {cameraRunning && autoCaptureEnabled && (
                                 <View style={[
-                                    styles.recordingBadge,
+                                    styles.detectionPill,
                                     lastDetectionStatus.status === 'POTHOLE_DETECTED'
-                                        ? { backgroundColor: '#EF4444' }
+                                        ? { backgroundColor: '#DC2626' }
                                         : lastDetectionStatus.status === 'CLEAR'
-                                            ? { backgroundColor: '#6B7280' }
-                                            : { backgroundColor: '#10B981' }
+                                            ? { backgroundColor: '#374151' }
+                                            : { backgroundColor: '#059669' }
                                 ]}>
-                                    <Text style={styles.recordingText}>
+                                    <Text style={styles.detectionPillText}>
                                         {lastDetectionStatus.status === 'POTHOLE_DETECTED'
-                                            ? `🕳️ POTHOLE DETECTED (${lastDetectionStatus.confidence}%) - SAVED!`
+                                            ? `🕳️ POTHOLE DETECTED (${lastDetectionStatus.confidence}%)`
                                             : lastDetectionStatus.status === 'CLEAR'
-                                                ? '🟢 ROAD CLEAR (SKIP)'
-                                                : '⚡ AI SCANNING FOR POTHOLES'}
+                                                ? '🟢 ROAD CLEAR'
+                                                : '⚡ AI SCANNING'}
                                     </Text>
                                 </View>
                             )}
                             {offlineQueueCount > 0 && (
-                                <View style={[styles.recordingBadge, { backgroundColor: '#F59E0B' }]}>
-                                    <Text style={styles.recordingText}>💾 {offlineQueueCount} QUEUED</Text>
+                                <View style={[styles.detectionPill, { backgroundColor: '#D97706' }]}>
+                                    <Text style={styles.detectionPillText}>💾 {offlineQueueCount} QUEUED</Text>
                                 </View>
                             )}
                         </View>
                     </View>
 
                     {/* Bottom Controls */}
-                    <View style={[styles.cameraControls, { paddingBottom: Math.max(insets.bottom + spacing.md, 24), flexDirection: 'column', width: '100%' }]}>
+                    <View style={[styles.cameraControls, { paddingBottom: Math.max(insets.bottom + 16, 28) }]}>
                         {cameraRunning && (
-                            <View style={{ flexDirection: 'row', gap: spacing.sm, width: '100%', marginBottom: spacing.sm }}>
-                                <Button
-                                    title={autoCaptureEnabled ? "⚡ Auto-Capture: ON" : "⏸️ Auto-Capture: OFF"}
+                            <View style={styles.controlRow}>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.controlButton,
+                                        autoCaptureEnabled ? styles.autoCaptureOn : styles.autoCaptureOff
+                                    ]}
                                     onPress={() => setAutoCaptureEnabled(prev => !prev)}
-                                    variant={autoCaptureEnabled ? "success" : "secondary"}
-                                    style={{ flex: 1, backgroundColor: autoCaptureEnabled ? '#10B981' : '#6B7280' }}
-                                />
-                                <Button
-                                    title="📸 Manual Photo"
+                                >
+                                    <Text style={styles.controlButtonText}>
+                                        {autoCaptureEnabled ? "⚡ Auto: ON" : "⏸ Auto: OFF"}
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[styles.controlButton, styles.manualCaptureBtn]}
                                     onPress={handleCapturePhoto}
-                                    loading={uploadingDetection}
-                                    variant="primary"
-                                    style={{ flex: 1 }}
-                                />
+                                    disabled={uploadingDetection}
+                                >
+                                    <Text style={styles.controlButtonText}>📸 Manual</Text>
+                                </TouchableOpacity>
                             </View>
                         )}
-                        {reviewPhotos.length > 0 && (
-                            <Button
-                                title={`📋  Review & Inspect Photos (${reviewPhotos.length})`}
-                                onPress={() => setShowReviewScreen(true)}
-                                variant="secondary"
-                                style={{ width: '100%', marginBottom: spacing.sm, backgroundColor: '#3B82F6' }}
-                            />
-                        )}
-                        <View style={{ flexDirection: 'row', width: '100%', gap: spacing.md }}>
+
+                        <View style={styles.controlRow}>
                             {!cameraRunning ? (
-                                <Button
-                                    title="▶  Start Survey & Auto-Capture"
+                                <TouchableOpacity
+                                    style={[styles.controlButton, styles.startBtn]}
                                     onPress={startCapturing}
-                                    variant="success"
-                                    style={{ flex: 1 }}
-                                />
+                                >
+                                    <Text style={styles.controlButtonText}>▶ Resume</Text>
+                                </TouchableOpacity>
                             ) : (
-                                <Button
-                                    title="⏸  Pause"
+                                <TouchableOpacity
+                                    style={[styles.controlButton, styles.pauseBtn]}
                                     onPress={stopCapturing}
-                                    variant="danger"
-                                    style={{ flex: 1 }}
-                                />
+                                >
+                                    <Text style={styles.controlButtonText}>⏸ Pause</Text>
+                                </TouchableOpacity>
                             )}
-                            <Button
-                                title={`📋  Review (${reviewPhotos.length})`}
+
+                            <TouchableOpacity
+                                style={[styles.controlButton, styles.reviewBtn]}
                                 onPress={() => setShowReviewScreen(true)}
-                                loading={ending}
-                                variant="primary"
-                                style={{ flex: 1 }}
-                            />
+                            >
+                                <Text style={styles.controlButtonText}>
+                                    📋 Review ({reviewPhotos.length})
+                                </Text>
+                            </TouchableOpacity>
                         </View>
                     </View>
                 </View>

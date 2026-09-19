@@ -194,18 +194,11 @@ export default function AssignmentDetailScreen() {
                         variant="primary"
                     />
                 ) : currentStatus === 'IN_PROGRESS' ? (
-                    <>
-                        <Button
-                            title="📹 Start Live Camera Survey"
-                            onPress={handleStartSurvey}
-                            variant="primary"
-                        />
-                        <Button
-                            title="📁 Import Photos from Gallery (Optional)"
-                            onPress={() => navigation.navigate('Survey', { assignment: { ...assignment, status: 'IN_PROGRESS' }, pickFromGallery: true })}
-                            variant="secondary"
-                        />
-                    </>
+                    <Button
+                        title="📹 Start Live Camera Survey"
+                        onPress={handleStartSurvey}
+                        variant="primary"
+                    />
                 ) : (
                     <View style={styles.completedBanner}>
                         <Text style={styles.completedText}>✓ Survey Completed</Text>

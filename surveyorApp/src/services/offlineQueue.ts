@@ -125,10 +125,52 @@ class OfflineQueueManager {
             };
 
             const updatedQueue = [...currentQueue, newItem];
-            await AsyncStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(updatedQueue));
+            await this.saveQueue(updatedQueue);
             this.log(`Added detection`, { id: newItem.id, queueSize: updatedQueue.length });
         } catch (error) {
             this.log('Failed to enqueue offline frames', error);
+        }
+    }
+
+    async enqueuePhotos(
+        photos: {
+            id: string;
+            uri: string;
+            latitude: number;
+            longitude: number;
+            accuracy?: number;
+            capturedAt?: string;
+        }[],
+        routeId: string,
+        wardId: string,
+        surveySessionId: string,
+        assignmentId: string
+    ): Promise<void> {
+        if (!photos || photos.length === 0) return;
+
+        try {
+            const currentQueue = await this.getQueue();
+            const newItems: OfflineQueueItem[] = photos.map((p, idx) => ({
+                id: p.id || `${Date.now()}_${idx}`,
+                frames: [p.uri],
+                routeId,
+                wardId,
+                surveySessionId,
+                assignmentId,
+                latitude: p.latitude,
+                longitude: p.longitude,
+                accuracy: p.accuracy,
+                capturedAt: p.capturedAt,
+                timestamp: Date.now(),
+                retryCount: 0,
+                status: QueueItemStatus.PENDING,
+            }));
+
+            const updatedQueue = [...currentQueue, ...newItems];
+            await this.saveQueue(updatedQueue);
+            this.log(`Enqueued ${photos.length} photos`, { totalQueueSize: updatedQueue.length });
+        } catch (error) {
+            this.log('Failed to enqueue photos', error);
         }
     }
 
@@ -180,7 +222,9 @@ class OfflineQueueManager {
             let failedCount = 0;
             const remainingQueue: OfflineQueueItem[] = [];
 
-            for (const item of currentQueue) {
+            for (let i = 0; i < currentQueue.length; i++) {
+                const item = currentQueue[i];
+
                 // Skip completed items
                 if (item.status === QueueItemStatus.COMPLETED) {
                     continue;
@@ -217,16 +261,14 @@ class OfflineQueueManager {
                 try {
                     this.log('Upload attempt', { id: item.id, attempt: item.retryCount + 1 });
 
-                    // Mark as uploading
-                    item.status = QueueItemStatus.UPLOADING;
-                    await this.saveQueue([...currentQueue.filter(i => i.id !== item.id), item]);
-
                     const result = await uploadFn(item);
 
                     if (result.success) {
                         this.log('Upload succeeded', { id: item.id });
                         syncedCount++;
-                        // Item is removed from queue (not added to remainingQueue)
+                        // Immediately update saved queue so listeners update in real time
+                        const currentRemaining = [...remainingQueue, ...currentQueue.slice(i + 1)];
+                        await this.saveQueue(currentRemaining);
                     } else {
                         const httpStatus = result.httpStatus;
                         const errorMessage = result.message;
@@ -247,6 +289,8 @@ class OfflineQueueManager {
                             // Duplicate detection - treat as success
                             this.log('Duplicate detection - treating as success', { id: item.id });
                             syncedCount++;
+                            const currentRemaining = [...remainingQueue, ...currentQueue.slice(i + 1)];
+                            await this.saveQueue(currentRemaining);
                         } else {
                             // Retryable error - increment retry count and schedule backoff
                             const newRetryCount = item.retryCount + 1;
@@ -283,8 +327,6 @@ class OfflineQueueManager {
 
             await this.saveQueue(remainingQueue);
 
-            this.log('Sync completed', { synced: syncedCount, remaining: remainingQueue.length, failed: failedCount });
-            return { synced: syncedCount, remaining: remainingQueue.length, failed: failedCount };
         } finally {
             this.isProcessingQueue = false;
         }
