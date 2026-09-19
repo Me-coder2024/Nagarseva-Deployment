@@ -197,3 +197,27 @@ export const dashboardApi = {
     return { success: true, data: { stats, employees, issues, routes, wards } };
   },
 };
+
+// Pavement Condition Index (PCI) API
+export const pciApi = {
+  getWardsPci: async () => {
+    const response = await api.get<ApiResponse<any>>('/api/admin/pci/wards');
+    return response.data;
+  },
+  getRoutesPci: async () => {
+    const response = await api.get<ApiResponse<any>>('/api/admin/pci/routes');
+    return response.data;
+  },
+};
+
+// Route Optimization (TSP) API
+export const routeOptimizationApi = {
+  getEngineerOptimizedRoute: async (engineerId: string, lat?: number, lon?: number) => {
+    const params: Record<string, any> = {};
+    if (lat !== undefined) params.lat = lat;
+    if (lon !== undefined) params.lon = lon;
+    const response = await api.get<ApiResponse<any>>(`/api/admin/engineers/${engineerId}/optimized-route`, { params });
+    return response.data;
+  },
+};
+

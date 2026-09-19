@@ -211,8 +211,8 @@ class OfflineQueueManager {
         this.isProcessingQueue = true;
 
         try {
-            const currentQueue = await this.getQueue();
-            if (currentQueue.length === 0) {
+            const currentQueue = (await this.getQueue()) || [];
+            if (!Array.isArray(currentQueue) || currentQueue.length === 0) {
                 return { synced: 0, remaining: 0, failed: 0 };
             }
 
@@ -224,6 +224,7 @@ class OfflineQueueManager {
 
             for (let i = 0; i < currentQueue.length; i++) {
                 const item = currentQueue[i];
+                if (!item) continue;
 
                 // Skip completed items
                 if (item.status === QueueItemStatus.COMPLETED) {
@@ -245,7 +246,7 @@ class OfflineQueueManager {
                 }
 
                 // Check if we've exceeded max retries
-                if (!force && item.retryCount >= MAX_UPLOAD_RETRIES) {
+                if (!force && (item.retryCount || 0) >= MAX_UPLOAD_RETRIES) {
                     this.log('Max retries exceeded', { id: item.id, retryCount: item.retryCount });
                     remainingQueue.push({ ...item, status: QueueItemStatus.FAILED });
                     failedCount++;
@@ -259,31 +260,31 @@ class OfflineQueueManager {
                 }
 
                 try {
-                    this.log('Upload attempt', { id: item.id, attempt: item.retryCount + 1 });
+                    this.log('Upload attempt', { id: item.id, attempt: (item.retryCount || 0) + 1 });
 
                     const result = await uploadFn(item);
 
-                    if (result.success) {
+                    if (result && result.success) {
                         this.log('Upload succeeded', { id: item.id });
                         syncedCount++;
                         // Immediately update saved queue so listeners update in real time
                         const currentRemaining = [...remainingQueue, ...currentQueue.slice(i + 1)];
                         await this.saveQueue(currentRemaining);
                     } else {
-                        const httpStatus = result.httpStatus;
-                        const errorMessage = result.message;
+                        const httpStatus = result?.httpStatus;
+                        const errorMessage = result?.message;
 
                         if (httpStatus === 401) {
                             // Authentication error - pause queue
                             this.isPaused = true;
                             this.pauseReason = 'Authentication required';
                             this.log('Queue paused - authentication required', { id: item.id });
-                            remainingQueue.push({ ...item, status: QueueItemStatus.PENDING, retryCount: item.retryCount, httpStatus, lastError: errorMessage });
+                            remainingQueue.push({ ...item, status: QueueItemStatus.PENDING, retryCount: item.retryCount || 0, httpStatus, lastError: errorMessage });
                             break; // Stop processing
                         } else if (this.isPermanentError(httpStatus)) {
                             // Permanent error - mark as failed
                             this.log('Permanent failure', { id: item.id, httpStatus, message: errorMessage });
-                            remainingQueue.push({ ...item, status: QueueItemStatus.FAILED, retryCount: item.retryCount, httpStatus, lastError: errorMessage });
+                            remainingQueue.push({ ...item, status: QueueItemStatus.FAILED, retryCount: item.retryCount || 0, httpStatus, lastError: errorMessage });
                             failedCount++;
                         } else if (httpStatus === 409 && errorMessage && errorMessage.toLowerCase().includes('already exists')) {
                             // Duplicate detection - treat as success
@@ -293,7 +294,7 @@ class OfflineQueueManager {
                             await this.saveQueue(currentRemaining);
                         } else {
                             // Retryable error - increment retry count and schedule backoff
-                            const newRetryCount = item.retryCount + 1;
+                            const newRetryCount = (item.retryCount || 0) + 1;
                             const backoffDelay = this.calculateBackoff(newRetryCount);
                             const nextRetryAt = Date.now() + backoffDelay;
 
@@ -310,7 +311,7 @@ class OfflineQueueManager {
                     }
                 } catch (error: any) {
                     // Network or unexpected error - retryable
-                    const newRetryCount = item.retryCount + 1;
+                    const newRetryCount = (item.retryCount || 0) + 1;
                     const backoffDelay = this.calculateBackoff(newRetryCount);
                     const nextRetryAt = Date.now() + backoffDelay;
 
@@ -326,7 +327,11 @@ class OfflineQueueManager {
             }
 
             await this.saveQueue(remainingQueue);
-
+            return { synced: syncedCount, remaining: remainingQueue.length, failed: failedCount };
+        } catch (queueError) {
+            this.log('Error during syncQueue execution', queueError);
+            const rem = await this.getTotalPendingPhotosCount().catch(() => 0);
+            return { synced: 0, remaining: rem, failed: 0 };
         } finally {
             this.isProcessingQueue = false;
         }

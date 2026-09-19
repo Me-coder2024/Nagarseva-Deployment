@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -14,6 +14,7 @@ import {
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { launchCamera, CameraOptions, ImagePickerResponse } from 'react-native-image-picker';
+import Geolocation from '@react-native-community/geolocation';
 import api from '../../services/api';
 import { getMobileErrorMessage } from '../../services/mobileApiUtils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -21,6 +22,18 @@ import { Issue, StatusUpdatePayload } from '../../types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EngineerStackParamList } from '../../navigation/EngineerNavigator';
 import { Colors, Typography, BorderRadius, Spacing, getStatusConfig, getTypeConfig } from '../../engineerTheme';
+
+function calculateHaversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371000; // meters
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return Math.round(R * c * 10) / 10;
+}
 
 type IssueDetailRouteProp = RouteProp<EngineerStackParamList, 'IssueDetail'>;
 type IssueDetailNavigationProp = NativeStackNavigationProp<EngineerStackParamList, 'IssueDetail'>;
@@ -41,6 +54,42 @@ export function IssueDetailScreen() {
     // Status timeline
     const statusOrder = ['DETECTED', 'ASSIGNED', 'IN_PROGRESS', 'FIXED', 'RESOLVED'];
     const currentStatusIndex = statusOrder.indexOf(issue.status);
+
+    const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number; accuracy?: number } | null>(null);
+    const [distanceMeters, setDistanceMeters] = useState<number | null>(null);
+    const [isLocating, setIsLocating] = useState(false);
+
+    const updateDistance = useCallback((lat: number, lon: number) => {
+        if (issue.latitude && issue.longitude) {
+            const d = calculateHaversineDistanceMeters(issue.latitude, issue.longitude, lat, lon);
+            setDistanceMeters(d);
+        }
+    }, [issue.latitude, issue.longitude]);
+
+    const fetchCurrentLocation = useCallback(() => {
+        setIsLocating(true);
+        Geolocation.getCurrentPosition(
+            (pos) => {
+                const loc = {
+                    latitude: pos.coords.latitude,
+                    longitude: pos.coords.longitude,
+                    accuracy: pos.coords.accuracy,
+                };
+                setCurrentLocation(loc);
+                updateDistance(loc.latitude, loc.longitude);
+                setIsLocating(false);
+            },
+            (err) => {
+                console.warn('Geolocation error:', err);
+                setIsLocating(false);
+            },
+            { enableHighAccuracy: true, timeout: 12000, maximumAge: 10000 }
+        );
+    }, [updateDistance]);
+
+    useEffect(() => {
+        fetchCurrentLocation();
+    }, [fetchCurrentLocation]);
 
     const handleMarkInProgress = async () => {
         setIsLoading(true);
@@ -66,6 +115,7 @@ export function IssueDetailScreen() {
 
     const handleOpenFixModal = () => {
         setFixImage(null);
+        fetchCurrentLocation();
         setShowFixModal(true);
     };
 
@@ -109,7 +159,15 @@ export function IssueDetailScreen() {
 
         setIsLoading(true);
         try {
-            const response = await api.engineerSolveIssue(issue.id, user.id, fixImage.uri, fixImage.fileName);
+            const response = await api.engineerSolveIssue(
+                issue.id,
+                user.id,
+                fixImage.uri,
+                fixImage.fileName,
+                currentLocation?.latitude,
+                currentLocation?.longitude,
+                currentLocation?.accuracy
+            );
             if (response.success) {
                 setShowFixModal(false);
                 navigation.navigate('Confirmation', { issue: { ...issue, status: 'FIXED' } });
@@ -225,6 +283,51 @@ export function IssueDetailScreen() {
                                 <Text style={styles.coordinateValue}>{issue.longitude?.toFixed(6)}</Text>
                             </View>
                         </View>
+
+                        {/* Geo-fence Proof of Presence Card */}
+                        <View style={[
+                            styles.geofenceBox,
+                            distanceMeters !== null && distanceMeters <= 35
+                                ? styles.geofenceBoxSuccess
+                                : styles.geofenceBoxWarning
+                        ]}>
+                            <View style={styles.geofenceRow}>
+                                <Text style={styles.geofenceIcon}>
+                                    {distanceMeters !== null && distanceMeters <= 35 ? '🟢' : '⚠️'}
+                                </Text>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={[
+                                        styles.geofenceTitle,
+                                        distanceMeters !== null && distanceMeters <= 35
+                                            ? styles.geofenceTitleSuccess
+                                            : styles.geofenceTitleWarning
+                                    ]}>
+                                        {distanceMeters !== null && distanceMeters <= 35
+                                            ? 'Proof-of-Presence: Verified (< 35m)'
+                                            : 'Geo-fence Presence Alert'}
+                                    </Text>
+                                    <Text style={styles.geofenceSubtitle}>
+                                        {distanceMeters !== null
+                                            ? distanceMeters <= 35
+                                                ? `Within ${distanceMeters}m of reported coordinates. Field presence verified.`
+                                                : `Currently ${distanceMeters}m from site. Move within 35m for verified fix.`
+                                            : isLocating
+                                            ? 'Acquiring GPS location telemetry...'
+                                            : 'Location proximity not calculated yet.'}
+                                    </Text>
+                                </View>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.geofenceRefreshButton}
+                                onPress={fetchCurrentLocation}
+                                disabled={isLocating}
+                            >
+                                <Text style={styles.geofenceRefreshText}>
+                                    {isLocating ? '📡 Locating...' : '🔄 Verify GPS Distance'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
                         <TouchableOpacity
                             style={styles.directionsButton}
                             onPress={handleGetDirections}
@@ -750,5 +853,59 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.md,
         color: Colors.white,
         fontWeight: Typography.fontWeight.semibold,
+    },
+    geofenceBox: {
+        borderRadius: BorderRadius.md,
+        padding: Spacing.md,
+        marginVertical: Spacing.sm,
+        borderWidth: 1,
+    },
+    geofenceBoxSuccess: {
+        backgroundColor: '#f0fdf4',
+        borderColor: '#86efac',
+    },
+    geofenceBoxWarning: {
+        backgroundColor: '#fffbeb',
+        borderColor: '#fde68a',
+    },
+    geofenceRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+    },
+    geofenceIcon: {
+        fontSize: 18,
+        marginTop: 2,
+    },
+    geofenceTitle: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    geofenceTitleSuccess: {
+        color: '#15803d',
+    },
+    geofenceTitleWarning: {
+        color: '#b45309',
+    },
+    geofenceSubtitle: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.muted,
+        marginTop: 2,
+        lineHeight: 16,
+    },
+    geofenceRefreshButton: {
+        marginTop: Spacing.sm,
+        alignSelf: 'flex-start',
+        backgroundColor: Colors.white,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.xs,
+        borderRadius: BorderRadius.sm,
+        borderWidth: 1,
+        borderColor: Colors.border,
+    },
+    geofenceRefreshText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.medium,
+        color: Colors.primary,
     },
 });

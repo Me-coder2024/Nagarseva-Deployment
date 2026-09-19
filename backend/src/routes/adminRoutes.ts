@@ -7,6 +7,8 @@ import { requireAuth, requireRole } from "../middlewares/authMiddleware.js";
 import axios from "axios";
 import fs from "fs";
 import FormData from "form-data";
+import { calculateWardsPci, calculateRoutesPci } from "../services/pciService.js";
+import { optimizeEngineerRoute } from "../services/routeOptimizationService.js";
 
 const adminRouter = Router();
 
@@ -965,7 +967,10 @@ adminRouter.get(
           assignedEngineerName: latestAssignment?.engineer.name || null,
           analysis: issue.analysis ? {
             severity: issue.analysis.severity,
-            depthEstimateCm: issue.analysis.depthEstimateCm,
+            surfaceAreaPercent: issue.analysis.surfaceAreaPercent,
+            repairPatchClass: issue.analysis.repairPatchClass,
+            edgeRoughness: issue.analysis.edgeRoughness,
+            waterlogged: issue.analysis.waterlogged,
             sizeClass: issue.analysis.sizeClass,
             priorityScore: issue.analysis.priorityScore,
             recommendations: issue.analysis.recommendations,
@@ -976,6 +981,13 @@ adminRouter.get(
             aiVerdict: latestResolution.aiVerdict,
             approved: latestResolution.approved,
             feedback: latestResolution.feedback,
+            isGeofenceVerified: latestResolution.isGeofenceVerified,
+            fixDistanceMeters: latestResolution.fixDistanceMeters,
+            fixLatitude: latestResolution.fixLatitude,
+            fixLongitude: latestResolution.fixLongitude,
+            sceneSimilarityScore: latestResolution.sceneSimilarityScore,
+            antiSpoofFlags: latestResolution.antiSpoofFlags,
+            isAuthenticFix: latestResolution.isAuthenticFix,
           } : null,
           createdAt: issue.createdAt.toISOString(),
           updatedAt: issue.updatedAt.toISOString(),
@@ -1036,10 +1048,13 @@ adminRouter.post(
         // Fallback intelligent road-hazard assessment
         analysisData = {
           severity: "HIGH",
-          depth_estimate_cm: 6.5,
+          surface_area_percent: 7.5,
+          repair_patch_class: "SECTION_ASPHALT_CUTOUT",
+          edge_roughness: "MODERATE",
+          waterlogged: false,
           size_class: "LARGE",
-          priority_score: 8,
-          recommendations: "Analyzed with road-defect AI heuristic. Scheduled for priority asphalt patching.",
+          priority_score: 7,
+          recommendations: "Analyzed with road-defect AI heuristic. Recommended rectangular section cutout and asphalt infill.",
         };
       }
 
@@ -1049,16 +1064,22 @@ adminRouter.post(
         create: {
           issueId: issue.id,
           severity: analysisData.severity || "HIGH",
-          depthEstimateCm: analysisData.depth_estimate_cm || 6.2,
+          surfaceAreaPercent: analysisData.surface_area_percent ?? 0,
+          repairPatchClass: analysisData.repair_patch_class || "SECTION_ASPHALT_CUTOUT",
+          edgeRoughness: analysisData.edge_roughness || "MODERATE",
+          waterlogged: analysisData.waterlogged ?? false,
           sizeClass: analysisData.size_class || "LARGE",
-          priorityScore: analysisData.priority_score || 8,
-          recommendations: analysisData.recommendations || "Verified with live YOLOv8 AI Model. Immediate patching required.",
+          priorityScore: analysisData.priority_score || 7,
+          recommendations: analysisData.recommendations || "Verified with live YOLOv8 AI Model. Immediate patching scheduled.",
         },
         update: {
           severity: analysisData.severity || "HIGH",
-          depthEstimateCm: analysisData.depth_estimate_cm || 6.2,
+          surfaceAreaPercent: analysisData.surface_area_percent ?? 0,
+          repairPatchClass: analysisData.repair_patch_class || "SECTION_ASPHALT_CUTOUT",
+          edgeRoughness: analysisData.edge_roughness || "MODERATE",
+          waterlogged: analysisData.waterlogged ?? false,
           sizeClass: analysisData.size_class || "LARGE",
-          priorityScore: analysisData.priority_score || 8,
+          priorityScore: analysisData.priority_score || 7,
           recommendations: analysisData.recommendations || "Re-analyzed with live YOLOv8 AI Model. Urgent repair scheduled.",
           analyzedAt: new Date(),
         }
@@ -1133,6 +1154,9 @@ adminRouter.post(
         return res.status(503).json({ success: false, message: "AI verification unavailable" });
       }
       const auditResult = aiAuditRes.data;
+      const antiSpoofFlagsStr = Array.isArray(auditResult.anti_spoof_flags)
+        ? auditResult.anti_spoof_flags.join(",")
+        : auditResult.anti_spoof_flags || "";
 
       // Save to IssueResolution
       let updatedRes;
@@ -1143,6 +1167,9 @@ adminRouter.post(
             repairQualityScore: auditResult.repair_quality_score,
             qualityRating: auditResult.quality_rating,
             aiVerdict: auditResult.verdict,
+            sceneSimilarityScore: auditResult.scene_similarity_pct,
+            antiSpoofFlags: antiSpoofFlagsStr,
+            isAuthenticFix: auditResult.is_authentic ?? true,
           }
         });
       } else {
@@ -1152,6 +1179,9 @@ adminRouter.post(
             repairQualityScore: auditResult.repair_quality_score,
             qualityRating: auditResult.quality_rating,
             aiVerdict: auditResult.verdict,
+            sceneSimilarityScore: auditResult.scene_similarity_pct,
+            antiSpoofFlags: antiSpoofFlagsStr,
+            isAuthenticFix: auditResult.is_authentic ?? true,
           }
         });
       }
@@ -1162,11 +1192,71 @@ adminRouter.post(
           repairQualityScore: updatedRes.repairQualityScore,
           qualityRating: updatedRes.qualityRating,
           aiVerdict: updatedRes.aiVerdict,
+          sceneSimilarityScore: updatedRes.sceneSimilarityScore,
+          antiSpoofFlags: updatedRes.antiSpoofFlags,
+          isAuthenticFix: updatedRes.isAuthenticFix,
+          isGeofenceVerified: updatedRes.isGeofenceVerified,
+          fixDistanceMeters: updatedRes.fixDistanceMeters,
         }
       });
     } catch (err: any) {
       console.error("auditResolution error:", err);
       return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  }
+);
+
+// Pavement Condition Index (PCI) API - Ward Breakdown
+adminRouter.get(
+  "/pci/wards",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req, res) => {
+    try {
+      const pciData = await calculateWardsPci();
+      return res.json({ success: true, data: pciData });
+    } catch (err: any) {
+      console.error("Error calculating wards PCI:", err);
+      return res.status(500).json({ success: false, message: "Failed to calculate Pavement Condition Index" });
+    }
+  }
+);
+
+// Pavement Condition Index (PCI) API - Route Breakdown
+adminRouter.get(
+  "/pci/routes",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req, res) => {
+    try {
+      const routesPci = await calculateRoutesPci();
+      return res.json({ success: true, data: routesPci });
+    } catch (err: any) {
+      console.error("Error calculating routes PCI:", err);
+      return res.status(500).json({ success: false, message: "Failed to calculate routes PCI" });
+    }
+  }
+);
+
+// Admin Engineer Route Optimization (TSP)
+adminRouter.get(
+  "/engineers/:id/optimized-route",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req, res) => {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, message: "Engineer ID is required" });
+    }
+    const { lat, lon } = req.query;
+    try {
+      const originLat = lat ? parseFloat(lat as string) : undefined;
+      const originLon = lon ? parseFloat(lon as string) : undefined;
+      const routePlan = await optimizeEngineerRoute(id, originLat, originLon);
+      return res.json({ success: true, data: routePlan });
+    } catch (err: any) {
+      console.error("Error optimizing engineer route for admin:", err);
+      return res.status(500).json({ success: false, message: err.message || "Failed to generate route plan" });
     }
   }
 );
@@ -1356,7 +1446,7 @@ adminRouter.get(
         orderBy: { createdAt: 'desc' },
       });
 
-      const csvHeader = 'ID,Type,Status,Ward,Route,Latitude,Longitude,Confidence,Severity,Depth(cm),Size,Priority,Created At\n';
+      const csvHeader = 'ID,Type,Status,Ward,Route,Latitude,Longitude,Confidence,Severity,Repair Patch Class,Spread (%),Moisture,Edge Roughness,Priority,Created At\n';
       const csvRows = issues.map(issue => {
         return [
           issue.id,
@@ -1368,8 +1458,10 @@ adminRouter.get(
           issue.longitude,
           issue.confidence || 0,
           issue.analysis?.severity || 'N/A',
-          issue.analysis?.depthEstimateCm || 'N/A',
-          issue.analysis?.sizeClass || 'N/A',
+          issue.analysis?.repairPatchClass || 'N/A',
+          issue.analysis?.surfaceAreaPercent != null ? `${issue.analysis.surfaceAreaPercent}%` : 'N/A',
+          issue.analysis?.waterlogged ? 'Waterlogged' : 'Dry',
+          issue.analysis?.edgeRoughness || 'N/A',
           issue.analysis?.priorityScore || 'N/A',
           issue.createdAt.toISOString(),
         ].join(',');
@@ -1394,13 +1486,12 @@ adminRouter.get(
   requireRole("ADMIN"),
   async (req, res) => {
     try {
-      // Default / fallback weather data for Vadodara
-      let weatherData = {
-        temperature: 31.5,
-        precipitationMm: 18.4,
-        rainProbability: 78,
-        weatherCondition: "Thunderstorm & Heavy Rain",
-      };
+      let weatherData: {
+        temperature: number | null;
+        precipitationMm: number;
+        rainProbability: number;
+        weatherCondition: string;
+      } | null = null;
 
       try {
         const weatherRes = await axios.get(
@@ -1410,15 +1501,17 @@ adminRouter.get(
         if (weatherRes.data) {
           const current = weatherRes.data.current_weather;
           const daily = weatherRes.data.daily;
+          const precipMm = Number(daily?.precipitation_sum?.[0] || 0);
+          const rainProb = Number(daily?.precipitation_probability_max?.[0] || 0);
           weatherData = {
-            temperature: current?.temperature || 31.5,
-            precipitationMm: daily?.precipitation_sum?.[0] || 18.4,
-            rainProbability: daily?.precipitation_probability_max?.[0] || 78,
-            weatherCondition: (daily?.precipitation_sum?.[0] || 18.4) > 10 ? "Heavy Monsoon Showers" : "Moderate Rain",
+            temperature: current?.temperature ?? null,
+            precipitationMm: precipMm,
+            rainProbability: rainProb,
+            weatherCondition: precipMm > 10 ? "Heavy Monsoon Showers" : (precipMm > 0 ? "Moderate / Light Rain" : "Normal / Clear"),
           };
         }
       } catch (err) {
-        console.log("Using cached/fallback meteorological data for Vadodara monsoon risk computation");
+        console.log("Live weather radar offline for Vadodara monsoon risk computation");
       }
 
       // Fetch wards and open issues
@@ -1429,6 +1522,9 @@ adminRouter.get(
         }
       });
 
+      const rainProb = weatherData?.rainProbability ?? 0;
+      const precipMm = weatherData?.precipitationMm ?? 0;
+
       // Compute vulnerability per ward
       const wardRisks = wards.map((ward) => {
         const wardIssues = openIssues.filter((i) => i.wardId === ward.id);
@@ -1438,8 +1534,8 @@ adminRouter.get(
         const score = Math.min(
           100,
           Math.round(
-            (weatherData.rainProbability * 0.35) +
-            (weatherData.precipitationMm * 1.5) +
+            (rainProb * 0.35) +
+            (precipMm * 1.5) +
             (potholeCount * 9) +
             (garbageCount * 4)
           )

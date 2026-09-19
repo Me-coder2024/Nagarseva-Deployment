@@ -13,6 +13,7 @@ import {
     StatusBar,
     NativeModules,
     Animated,
+    TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
@@ -54,6 +55,8 @@ export interface ReviewPhoto {
     capturedAt?: string;
     timestamp: string;
     gpsTimestamp?: number;
+    source?: 'AI_DETECTED' | 'MANUAL';
+    confidence?: number;
 }
 
 type NavigationProp = NativeStackNavigationProp<SurveyorStackParamList, 'Survey'>;
@@ -75,6 +78,8 @@ export default function SurveyScreen() {
     const [reviewPhotos, setReviewPhotos] = useState<ReviewPhoto[]>([]);
     const [showReviewScreen, setShowReviewScreen] = useState(false);
     const [isUploadingApproved, setIsUploadingApproved] = useState(false);
+    const [reviewFilter, setReviewFilter] = useState<'ALL' | 'AI' | 'MANUAL'>('ALL');
+    const [manualToast, setManualToast] = useState<string | null>(null);
 
     const REVIEW_PHOTOS_KEY = `@nagarseva_review_photos_${assignment.id}`;
 
@@ -112,6 +117,7 @@ export default function SurveyScreen() {
         bbox?: number[];
     } | null>(null);
     const [uploadingDetection, setUploadingDetection] = useState(false);
+    const [showDetectionBox, setShowDetectionBox] = useState(false);
 
     // Loading states
     const [starting, setStarting] = useState(false);
@@ -338,6 +344,8 @@ export default function SurveyScreen() {
                 capturedAt: gpsSnapshot.capturedAt || new Date().toISOString(),
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
                 gpsTimestamp: gpsSnapshot.timestamp,
+                source: 'AI_DETECTED',
+                confidence: Math.round((detectionResult.confidence || 0.90) * 100),
             };
 
             setReviewPhotos(prev => {
@@ -432,26 +440,31 @@ export default function SurveyScreen() {
     // Background Auto-Sync Effect (Flushes offline queue every 10 seconds)
     useEffect(() => {
         const syncTimer = setInterval(async () => {
-            const queueLen = await offlineQueue.getQueueLength();
+            const queueLen = await offlineQueue.getQueueLength().catch(() => 0);
             if (queueLen > 0) {
                 console.log(`🌐 Auto-Sync: Flushing ${queueLen} offline queued item(s)...`);
                 await offlineQueue.syncQueue(async (item) => {
-                    const res = await api.reportDetection(
-                        item.frames[0],
-                        item.routeId,
-                        item.wardId,
-                        item.surveySessionId,
-                        item.assignmentId,
-                        item.latitude,
-                        item.longitude,
-                        0.90,
-                        undefined,
-                        item.accuracy,
-                        item.capturedAt
-                    );
-                    return { success: !!(res && res.success), httpStatus: res?.httpStatus, message: res?.message };
+                    try {
+                        const res = await api.reportDetection(
+                            item.frames[0],
+                            item.routeId,
+                            item.wardId,
+                            item.surveySessionId,
+                            item.assignmentId,
+                            item.latitude,
+                            item.longitude,
+                            0.90,
+                            undefined,
+                            item.accuracy,
+                            item.capturedAt,
+                            item.id
+                        );
+                        return { success: !!(res && res.success), httpStatus: res?.httpStatus, message: res?.message };
+                    } catch (e: any) {
+                        return { success: false, message: e?.message };
+                    }
                 });
-                const remaining = await offlineQueue.getQueueLength();
+                const remaining = await offlineQueue.getQueueLength().catch(() => 0);
                 setOfflineQueueCount(remaining);
             }
         }, 10000);
@@ -670,27 +683,25 @@ export default function SurveyScreen() {
                     ? `file://${rawPath}`
                     : `file:///${rawPath}`;
 
-            // CRITICAL: Always request fresh GPS for manual photo capture
-            // DO NOT use cached GPS - this was causing all detections to have the same location
-            console.log('[MANUAL CAPTURE] Requesting fresh GPS for this photo...');
-            const gpsSnapshot = await getLiveCoordinates();
-            const lat = gpsSnapshot?.latitude;
-            const lon = gpsSnapshot?.longitude;
+            // Fetch live coordinates or fallback to last known GPS
+            let lat = lastPosRef.current?.latitude || 0;
+            let lon = lastPosRef.current?.longitude || 0;
+            let acc = lastPosRef.current?.accuracy || 10;
+            let capturedAt = lastPosRef.current?.capturedAt || new Date().toISOString();
 
-            if (!lat || !lon) {
-                Alert.alert(
-                    '⚠️ GPS Lock Required',
-                    'Could not acquire live device GPS coordinates. Please ensure Location services are ON.'
-                );
-                return;
-            }
-
-            if (gpsSnapshot.accuracy && gpsSnapshot.accuracy > MAX_ACCEPTABLE_GPS_ACCURACY) {
-                Alert.alert(
-                    '⚠️ Weak GPS Signal',
-                    `Current GPS accuracy is ±${Math.round(gpsSnapshot.accuracy)}m (threshold: ±${MAX_ACCEPTABLE_GPS_ACCURACY}m). Please move to an open area before capturing.`
-                );
-                return;
+            try {
+                const gpsSnapshot = await Promise.race([
+                    getLiveCoordinates('manual'),
+                    new Promise<null>((r) => setTimeout(() => r(null), 1500))
+                ]);
+                if (gpsSnapshot && gpsSnapshot.latitude && gpsSnapshot.longitude) {
+                    lat = gpsSnapshot.latitude;
+                    lon = gpsSnapshot.longitude;
+                    acc = gpsSnapshot.accuracy;
+                    capturedAt = gpsSnapshot.capturedAt || capturedAt;
+                }
+            } catch (e) {
+                // Ignore timeout, use last known position
             }
 
             triggerDetectionFlash();
@@ -700,9 +711,10 @@ export default function SurveyScreen() {
                 uri: photoUri,
                 latitude: lat,
                 longitude: lon,
-                accuracy: gpsSnapshot.accuracy,
-                capturedAt: gpsSnapshot.capturedAt || new Date().toISOString(),
+                accuracy: acc,
+                capturedAt: capturedAt,
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                source: 'MANUAL',
             };
 
             setReviewPhotos(prev => {
@@ -712,13 +724,15 @@ export default function SurveyScreen() {
             });
             setIssuesDetected(prev => prev + 1);
 
-            Alert.alert(
-                '📸 Photo Saved with GPS',
-                `Location: (${lat.toFixed(4)}, ${lon.toFixed(4)}).\nAdded to review queue. Tap "Review & Upload Photos" to inspect or delete improper photos before sending to Admin.`
-            );
+            // Silent toast notification on camera screen (no blocking popup!)
+            setManualToast('📸 Photo captured & added to review queue');
+            setTimeout(() => {
+                setManualToast(null);
+            }, 2500);
         } catch (err: any) {
             console.error('Capture photo error:', err);
-            Alert.alert('Error', 'Failed to capture photo');
+            setManualToast('⚠️ Capture failed');
+            setTimeout(() => setManualToast(null), 2000);
         } finally {
             setUploadingDetection(false);
         }
@@ -727,7 +741,7 @@ export default function SurveyScreen() {
     const handleDeletePhoto = (id: string) => {
         Alert.alert(
             'Delete Photo',
-            'Are you sure you want to delete this improper photo?',
+            'Are you sure you want to delete this photo from the upload queue?',
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -910,22 +924,66 @@ export default function SurveyScreen() {
 
     // Photo Review & Delete Screen View (Before Upload to Admin)
     if (showReviewScreen) {
+        const aiCount = reviewPhotos.filter(p => p.source === 'AI_DETECTED').length;
+        const manualCount = reviewPhotos.filter(p => p.source === 'MANUAL').length;
+
+        const filteredPhotos = reviewPhotos.filter(p => {
+            if (reviewFilter === 'AI') return p.source === 'AI_DETECTED';
+            if (reviewFilter === 'MANUAL') return p.source === 'MANUAL';
+            return true;
+        });
+
         return (
             <View style={styles.container}>
                 <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
                 <Header
                     title="Review Survey Photos"
-                    subtitle={`${reviewPhotos.length} photo${reviewPhotos.length === 1 ? '' : 's'} ready for upload`}
+                    subtitle={`${reviewPhotos.length} photo${reviewPhotos.length === 1 ? '' : 's'} (${aiCount} AI, ${manualCount} Manual)`}
                     onBack={() => setShowReviewScreen(false)}
                 />
 
+                {/* Filter Tabs */}
+                <View style={styles.filterTabsContainer}>
+                    <TouchableOpacity
+                        style={[styles.filterTab, reviewFilter === 'ALL' && styles.filterTabActive]}
+                        onPress={() => setReviewFilter('ALL')}
+                        activeOpacity={0.7}
+                    >
+                        <Text style={[styles.filterTabText, reviewFilter === 'ALL' && styles.filterTabTextActive]}>
+                            All ({reviewPhotos.length})
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.filterTab, reviewFilter === 'AI' && styles.filterTabActive]}
+                        onPress={() => setReviewFilter('AI')}
+                        activeOpacity={0.7}
+                    >
+                        <Text style={[styles.filterTabText, reviewFilter === 'AI' && styles.filterTabTextActive]}>
+                            🤖 AI ({aiCount})
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.filterTab, reviewFilter === 'MANUAL' && styles.filterTabActive]}
+                        onPress={() => setReviewFilter('MANUAL')}
+                        activeOpacity={0.7}
+                    >
+                        <Text style={[styles.filterTabText, reviewFilter === 'MANUAL' && styles.filterTabTextActive]}>
+                            📸 Manual ({manualCount})
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+
                 <View style={styles.screenBody}>
-                    {reviewPhotos.length === 0 ? (
+                    {filteredPhotos.length === 0 ? (
                         <View style={styles.emptyContainer}>
                             <Text style={{ fontSize: 44, marginBottom: spacing.sm }}>📸</Text>
-                            <Text style={styles.emptyTitle}>No Photos Captured</Text>
+                            <Text style={styles.emptyTitle}>
+                                {reviewPhotos.length === 0 ? 'No Photos Captured' : 'No Photos in this Filter'}
+                            </Text>
                             <Text style={styles.emptySubtitle}>
-                                Return to live camera to capture road photos.
+                                {reviewPhotos.length === 0
+                                    ? 'Return to live camera to capture road photos.'
+                                    : 'Switch filter tab or capture more photos.'}
                             </Text>
                             <Button
                                 title="📸 Return to Camera"
@@ -936,17 +994,29 @@ export default function SurveyScreen() {
                         </View>
                     ) : (
                         <FlatList
-                            data={reviewPhotos}
+                            data={filteredPhotos}
                             keyExtractor={item => item.id}
                             contentContainerStyle={[styles.reviewList, { paddingBottom: Math.max(insets.bottom + 100, 120) }]}
                             showsVerticalScrollIndicator={false}
                             renderItem={({ item, index }) => (
                                 <View style={styles.reviewPhotoCard}>
-                                    <Image
-                                        source={{ uri: item.uri }}
-                                        style={styles.reviewPhotoImage}
-                                        resizeMode="cover"
-                                    />
+                                    <View style={styles.reviewPhotoMediaContainer}>
+                                        <Image
+                                            source={{ uri: item.uri }}
+                                            style={styles.reviewPhotoImage}
+                                            resizeMode="cover"
+                                        />
+                                        <View style={[
+                                            styles.sourceBadge,
+                                            item.source === 'AI_DETECTED' ? styles.sourceBadgeAi : styles.sourceBadgeManual
+                                        ]}>
+                                            <Text style={styles.sourceBadgeText}>
+                                                {item.source === 'AI_DETECTED'
+                                                    ? `🤖 AI DETECTED (${item.confidence || 90}%)`
+                                                    : '📸 MANUAL CAPTURE'}
+                                            </Text>
+                                        </View>
+                                    </View>
                                     <View style={styles.reviewPhotoInfo}>
                                         <View style={styles.reviewPhotoHeader}>
                                             <Text style={styles.reviewPhotoIndex}>Photo #{index + 1}</Text>
@@ -954,7 +1024,7 @@ export default function SurveyScreen() {
                                         </View>
                                         <View style={styles.reviewGpsPill}>
                                             <Text style={styles.reviewPhotoGps}>
-                                                📍 {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}
+                                                📍 {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)} {item.accuracy ? `(±${Math.round(item.accuracy)}m)` : ''}
                                             </Text>
                                         </View>
                                         <Button
@@ -1127,6 +1197,13 @@ export default function SurveyScreen() {
                             <View style={styles.detectionLabelBadge}>
                                 <Text style={styles.detectionLabelText}>POTHOLE DETECTED</Text>
                             </View>
+                        </View>
+                    )}
+
+                    {/* Manual Toast Notification */}
+                    {manualToast && (
+                        <View style={styles.toastContainer}>
+                            <Text style={styles.toastText}>{manualToast}</Text>
                         </View>
                     )}
 
@@ -1668,5 +1745,82 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         fontSize: 11,
         fontWeight: 'bold',
+    },
+    filterTabsContainer: {
+        flexDirection: 'row',
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.sm,
+        backgroundColor: colors.surface,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+        gap: spacing.sm,
+    },
+    filterTab: {
+        flex: 1,
+        paddingVertical: 8,
+        paddingHorizontal: spacing.sm,
+        borderRadius: borderRadius.md,
+        backgroundColor: colors.surfaceAlt,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: colors.borderLight,
+    },
+    filterTabActive: {
+        backgroundColor: colors.primaryFaded,
+        borderColor: colors.primary,
+    },
+    filterTabText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: colors.textSecondary,
+    },
+    filterTabTextActive: {
+        color: colors.primary,
+        fontWeight: '700',
+    },
+    reviewPhotoMediaContainer: {
+        position: 'relative',
+        width: '100%',
+    },
+    sourceBadge: {
+        position: 'absolute',
+        top: 10,
+        left: 10,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: borderRadius.sm,
+        ...shadows.sm,
+    },
+    sourceBadgeAi: {
+        backgroundColor: 'rgba(5, 150, 105, 0.92)',
+    },
+    sourceBadgeManual: {
+        backgroundColor: 'rgba(37, 99, 235, 0.92)',
+    },
+    sourceBadgeText: {
+        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '800',
+        letterSpacing: 0.3,
+    },
+    toastContainer: {
+        position: 'absolute',
+        top: '18%',
+        alignSelf: 'center',
+        backgroundColor: 'rgba(15, 23, 42, 0.92)',
+        paddingHorizontal: spacing.lg,
+        paddingVertical: spacing.sm,
+        borderRadius: borderRadius.full,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+        ...shadows.lg,
+        zIndex: 100,
+    },
+    toastText: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '700',
+        letterSpacing: 0.2,
     },
 });

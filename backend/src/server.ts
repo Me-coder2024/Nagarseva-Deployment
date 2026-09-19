@@ -9,6 +9,7 @@ import { surveyorRouter } from "./routes/surveyorRoutes.js";
 import { engineerRouter } from "./routes/engineerRoutes.js";
 import { requireAuth, requireRole } from "./middlewares/authMiddleware.js";
 import { production, sqlAgentUrl, serviceHeaders, serviceTimeout, validateDeployment } from "./lib/deployment.js";
+import { processLocalCivicAiQuery } from "./services/aiChatService.js";
 
 validateDeployment();
 ["uploads/user-images", "uploads/model-images", "uploads/issues"].forEach(dir => fs.mkdirSync(dir, { recursive: true }));
@@ -32,18 +33,41 @@ app.get("/api/ready", async (_req, res) => {
 app.use("/api/admin", adminRouter);
 app.use("/api/surveyor", surveyorRouter);
 app.use("/api/engineer", engineerRouter);
+
 app.post("/api/chat/ask", requireAuth, requireRole("ADMIN"), async (req, res) => {
+  const question = req.body?.question || req.query.question || "How many open issues are there?";
+  const language = (req.body?.language || req.query.language || "english") as "english" | "hindi" | "gujarati";
+
   try {
     const url = `${sqlAgentUrl}/ask`;
-    const response = await axios.post(url, {
-      question: req.body?.question || req.query.question,
-      language: req.body?.language || req.query.language || "english",
-    }, { headers: serviceHeaders, timeout: serviceTimeout });
-    res.status(response.status).json(response.data);
+    // Attempt upstream SQL agent with quick 8s timeout
+    const response = await axios.post(
+      url,
+      { question, language },
+      { headers: serviceHeaders, timeout: 8000 }
+    );
+    if (response.data && (response.data.result || response.data.content)) {
+      return res.status(response.status).json(response.data);
+    }
   } catch (err: any) {
-    res.status(err.response?.status || 502).json({ error: "Chat service unavailable. Please try again shortly." });
+    console.log("[Seva Assistant] Upstream SQL agent unavailable or slow. Using internal real-time database AI engine.");
+  }
+
+  try {
+    // High-speed direct database intelligence
+    const localResult = await processLocalCivicAiQuery(question, language);
+    return res.status(200).json(localResult);
+  } catch (fallbackErr: any) {
+    console.error("[Seva Assistant] Error in local AI processor:", fallbackErr);
+    return res.status(500).json({
+      question,
+      result: {
+        content: "Sorry, I encountered an issue processing civic telemetry. Please try asking again shortly.",
+      },
+    });
   }
 });
+
 const port = Number(process.env.PORT || 3000);
 const server = app.listen(port, "0.0.0.0", () => console.log(`NagarSeva backend listening on port ${port}`));
 for (const signal of ["SIGTERM", "SIGINT"] as const) {

@@ -142,14 +142,18 @@ model Issue {
 }
 
 model IssueAnalysis {
-  id              String   @id @default(uuid())
-  issueId         String   @unique
-  severity        String
-  depthEstimateCm Float
-  sizeClass       String
-  priorityScore   Int
-  recommendations String
-  analyzedAt      DateTime @default(now())
+  id                 String   @id @default(uuid())
+  issueId            String   @unique
+  severity           String
+  depthEstimateCm    Float?   @default(0)
+  surfaceAreaPercent Float?   @default(0)
+  repairPatchClass   String?
+  edgeRoughness      String?
+  waterlogged        Boolean? @default(false)
+  sizeClass          String
+  priorityScore      Int
+  recommendations    String
+  analyzedAt         DateTime @default(now())
 
   issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
 }
@@ -174,6 +178,14 @@ model IssueResolution {
   repairQualityScore Int?
   qualityRating      String?
   aiVerdict          String?
+
+  isGeofenceVerified   Boolean? @default(false)
+  fixDistanceMeters    Float?
+  fixLatitude          Float?
+  fixLongitude         Float?
+  sceneSimilarityScore Float?
+  antiSpoofFlags       String?
+  isAuthenticFix       Boolean? @default(true)
 
   issue Issue @relation(fields: [issueId], references: [id])
 

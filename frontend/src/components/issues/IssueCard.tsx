@@ -6,6 +6,7 @@ import type { Issue } from '@/types';
 import { getIssueTypeLabel, getStatusBadgeVariant, getIssueTypeIcon } from '@/lib/issueUtils';
 import { MapPin, Clock, User, Wrench, Sparkles, AlertTriangle, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+const NO_IMAGE_PLACEHOLDER = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300' fill='%231e293b'%3E%3Crect width='400' height='300' fill='%230f172a'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2394a3b8' font-family='sans-serif' font-size='16'%3ENo Image Uploaded%3C/text%3E%3C/svg%3E";
 
 interface IssueCardProps {
   issue: Issue;
@@ -52,14 +53,13 @@ export const IssueCard = ({ issue, onAssignClick, onVerifyClick, onAnalyzeClick,
                   ? `${BACKEND_URL}${issue.imageUrl}`
                   : issue.imageUrl
                     ? `${BACKEND_URL}/${issue.imageUrl}`
-                    : "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=800&q=80"
+                    : NO_IMAGE_PLACEHOLDER
             }
             alt={issue.type}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
             onError={(e) => {
-              const fallback = "https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?auto=format&fit=crop&w=800&q=80";
-              if (e.currentTarget.src !== fallback) {
-                e.currentTarget.src = fallback;
+              if (e.currentTarget.src !== NO_IMAGE_PLACEHOLDER) {
+                e.currentTarget.src = NO_IMAGE_PLACEHOLDER;
               }
             }}
           />
@@ -126,16 +126,25 @@ export const IssueCard = ({ issue, onAssignClick, onVerifyClick, onAnalyzeClick,
             <div className="p-3 bg-gradient-to-br from-primary/5 via-primary/10 to-background rounded-lg border border-primary/20 text-xs space-y-2 shadow-inner">
               <div className="flex items-center justify-between font-semibold">
                 <span className="flex items-center gap-1.5 text-primary">
-                  <Sparkles className="w-4 h-4 animate-pulse text-amber-500" /> AI Analysis Results
+                  <Sparkles className="w-4 h-4 animate-pulse text-amber-500" /> AI Road Defect Analysis
                 </span>
                 <Badge className={getSeverityBadgeClass(issue.analysis.severity)}>
                   {issue.analysis.severity}
                 </Badge>
               </div>
-              <div className="grid grid-cols-2 gap-1.5 text-muted-foreground pt-1">
-                <div>Depth: <strong className="text-foreground">{issue.analysis.depthEstimateCm} cm</strong></div>
+              <div className="grid grid-cols-2 gap-1.5 text-muted-foreground pt-1 text-[11px]">
+                <div className="col-span-2 bg-primary/5 p-1.5 rounded border border-primary/10 flex items-center justify-between">
+                  <span className="text-muted-foreground">Actionable Patch:</span>
+                  <strong className="text-primary font-semibold">
+                    {issue.analysis.repairPatchClass
+                      ? issue.analysis.repairPatchClass.replace(/_/g, ' ')
+                      : (issue.analysis.sizeClass || 'SPOT COLD MIX')}
+                  </strong>
+                </div>
+                <div>Spread: <strong className="text-foreground">{issue.analysis.surfaceAreaPercent != null ? `${issue.analysis.surfaceAreaPercent}%` : 'N/A'}</strong></div>
                 <div>Priority: <strong className="text-foreground">{issue.analysis.priorityScore}/10</strong></div>
-                <div>Size: <strong className="text-foreground">{issue.analysis.sizeClass}</strong></div>
+                <div>Crater Edge: <strong className="text-foreground">{issue.analysis.edgeRoughness ? issue.analysis.edgeRoughness.replace(/_/g, ' ') : 'Normal'}</strong></div>
+                <div>Moisture: <strong className="text-foreground">{issue.analysis.waterlogged ? '💧 Waterlogged' : '☀️ Dry Surface'}</strong></div>
               </div>
               <p className="text-[11px] text-muted-foreground italic border-t border-border/40 pt-1.5 mt-1">
                 "{issue.analysis.recommendations}"

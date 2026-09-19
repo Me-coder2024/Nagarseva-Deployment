@@ -152,10 +152,26 @@ class ApiService {
         return this.put<GenericResponse>('/engineer/acceptAssignment', { issueId });
     }
 
-    async engineerSolveIssue(issueId: string, engineerId: string, fixImageUri?: string, fixImageName?: string): Promise<GenericResponse> {
+    async engineerSolveIssue(
+        issueId: string,
+        engineerId: string,
+        fixImageUri?: string,
+        fixImageName?: string,
+        latitude?: number,
+        longitude?: number,
+        accuracy?: number
+    ): Promise<GenericResponse> {
         const formData = new FormData();
         formData.append('issueId', issueId);
         formData.append('engineerId', engineerId);
+
+        if (latitude !== undefined && longitude !== undefined) {
+            formData.append('latitude', latitude.toString());
+            formData.append('longitude', longitude.toString());
+            if (accuracy !== undefined) {
+                formData.append('accuracy', accuracy.toString());
+            }
+        }
 
         if (fixImageUri) {
             formData.append('afterImage', {
@@ -176,6 +192,15 @@ class ApiService {
             console.error('engineerSolveIssue network error:', error);
             throw error;
         }
+    }
+
+    async getOptimizedRoute(lat?: number, lon?: number): Promise<any> {
+        const params: Record<string, string> = {};
+        if (lat !== undefined) params.lat = lat.toString();
+        if (lon !== undefined) params.lon = lon.toString();
+        const queryString = new URLSearchParams(params).toString();
+        const endpoint = `/engineer/optimized-route${queryString ? `?${queryString}` : ''}`;
+        return this.get<any>(endpoint);
     }
 
     // ==================== FRAME UPLOAD ====================

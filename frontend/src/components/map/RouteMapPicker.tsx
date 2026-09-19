@@ -13,7 +13,7 @@ interface RouteMapPickerProps {
   onSelectEnd: (lat: number, lon: number) => void;
 }
 
-// Custom Green Pickup Marker Icon (Google Maps / Rapido Style)
+// Custom Green Start Marker Icon
 const startIcon = L.divIcon({
   className: 'custom-start-marker',
   html: `<div style="
@@ -34,7 +34,7 @@ const startIcon = L.divIcon({
   iconAnchor: [16, 16],
 });
 
-// Custom Red Dropoff Marker Icon (Google Maps / Rapido Style)
+// Custom Red End Marker Icon
 const endIcon = L.divIcon({
   className: 'custom-end-marker',
   html: `<div style="
@@ -106,11 +106,11 @@ export const RouteMapPicker: React.FC<RouteMapPickerProps> = ({
           : 'bg-background/90 text-foreground border border-border'
       }`}>
         <span>
-          {activeMode === 'START' && '🟢 Click on map to set Pickup Start Location'}
-          {activeMode === 'END' && '🔴 Click on map to set Destination End Point'}
-          {!activeMode && '🗺️ Click map or drag markers to pick locations'}
+          {activeMode === 'START' && '🟢 Click on map to set Survey Start Location'}
+          {activeMode === 'END' && '🔴 Click on map to set Survey End Location'}
+          {!activeMode && '🗺️ Click map or drag markers to pick corridor coordinates'}
         </span>
-        <span className="text-[10px] opacity-80 uppercase tracking-wider font-mono">Google Maps View</span>
+        <span className="text-[10px] opacity-80 uppercase tracking-wider font-mono">Survey Map View</span>
       </div>
 
       <MapContainer
@@ -140,7 +140,7 @@ export const RouteMapPicker: React.FC<RouteMapPickerProps> = ({
             },
           }}
         >
-          <Popup>🟢 Start Location (Pickup)</Popup>
+          <Popup>🟢 Survey Start Corridor</Popup>
         </Marker>
 
         {/* End Location Marker */}
@@ -159,13 +159,18 @@ export const RouteMapPicker: React.FC<RouteMapPickerProps> = ({
             },
           }}
         >
-          <Popup>🔴 End Location (Destination)</Popup>
+          <Popup>🔴 Survey End Corridor</Popup>
         </Marker>
 
-        {/* Route Connecting Line (Rapido / Google Maps Style Polyline) */}
+        {/* Route Connecting Line (Corridor Polyline) */}
         <Polyline
           positions={routePolyline}
-          pathOptions={{ color: '#3b82f6', weight: 4, opacity: 0.8, dashArray: '8, 8' }}
+          pathOptions={{
+            color: '#3b82f6',
+            weight: 4,
+            dashArray: '8, 8',
+            opacity: 0.8,
+          }}
         />
 
         <MapEvents
@@ -177,5 +182,3 @@ export const RouteMapPicker: React.FC<RouteMapPickerProps> = ({
     </div>
   );
 };
-
-export default RouteMapPicker;

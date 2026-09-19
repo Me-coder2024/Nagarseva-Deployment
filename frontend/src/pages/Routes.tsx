@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { useRoutes, useSurveyors, useWards } from "@/hooks/useMockData";
+import { useRoutes, useSurveyors, useWards } from "@/hooks/useData";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,7 +31,7 @@ import { UserPlus, Route as RouteIcon, MapPin, Plus, Navigation, ChevronDown, Ch
 import { toast } from "sonner";
 import { useTranslation } from 'react-i18next';
 
-// Preset Vadodara Landmarks for Rapido-style route destination selection
+// Preset Vadodara Landmarks for municipal survey corridor selection
 const VADODARA_LANDMARKS = [
   { id: 'alkapuri', name: 'Alkapuri Railway Station Circle', lat: 22.3085, lon: 73.1732 },
   { id: 'oproad', name: 'OP Road Junction', lat: 22.3012, lon: 73.1610 },
@@ -81,7 +81,7 @@ const Routes = () => {
   const [editingRoute, setEditingRoute] = useState<any>(null);
   const [selectedSurveyor, setSelectedSurveyor] = useState<string>("");
 
-  // Rapido-style Route Destination State
+  // Survey Route Corridor State
   const [startLandmarkId, setStartLandmarkId] = useState<string>("alkapuri");
   const [endLandmarkId, setEndLandmarkId] = useState<string>("birdcircle");
   const [newRouteName, setNewRouteName] = useState("Alkapuri Railway Station Circle to Bird Circle (Old Padra Road)");
@@ -460,7 +460,7 @@ const Routes = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Create Custom Route Modal (Rapido Style Location Selector) */}
+        {/* Create Custom Survey Route Modal */}
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
           <DialogContent className="max-w-lg">
             <DialogHeader>
@@ -468,17 +468,17 @@ const Routes = () => {
                 <Navigation className="w-5 h-5 text-primary animate-pulse" /> Create Municipal Route
               </DialogTitle>
               <DialogDescription>
-                Select starting pickup location and destination point (Rapido-style destination assignment).
+                Define road survey start corridor and end destination coordinates.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 pt-2">
-              {/* Rapido-Style Location Selection Card */}
+              {/* Survey Corridor Selection Card */}
               <div className="p-4 rounded-xl bg-gradient-to-b from-muted/50 to-muted/20 border border-border/80 relative space-y-3">
                 {/* Vertical Dotted Connector Line */}
                 <div className="absolute left-[27px] top-[42px] bottom-[42px] w-0.5 border-l-2 border-dashed border-primary/50 z-0" />
 
-                {/* Start Location (Green Pickup Point) */}
+                {/* Start Location (Green Start Corridor) */}
                 <div className="relative z-10 flex items-start gap-3">
                   <div className="w-7 h-7 rounded-full bg-emerald-500/15 text-emerald-600 border border-emerald-500/40 flex items-center justify-center font-bold text-xs shrink-0 mt-1 shadow-sm">
                     🟢
@@ -486,7 +486,7 @@ const Routes = () => {
                   <div className="flex-1 space-y-1">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1">
-                        Start Location (Pickup Point)
+                        Survey Start Point (Start Corridor)
                       </label>
                       <button
                         type="button"
@@ -515,7 +515,7 @@ const Routes = () => {
                   </div>
                 </div>
 
-                {/* End Location (Red Dropoff Point) */}
+                {/* End Location (Red End Corridor) */}
                 <div className="relative z-10 flex items-start gap-3 pt-1">
                   <div className="w-7 h-7 rounded-full bg-rose-500/15 text-rose-600 border border-rose-500/40 flex items-center justify-center font-bold text-xs shrink-0 mt-1 shadow-sm">
                     🔴
@@ -523,7 +523,7 @@ const Routes = () => {
                   <div className="flex-1 space-y-1">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider flex items-center gap-1">
-                        End Destination (Drop-off Point)
+                        Survey End Point (End Corridor)
                       </label>
                       <button
                         type="button"
@@ -553,7 +553,7 @@ const Routes = () => {
                 </div>
               </div>
 
-              {/* Interactive Google Maps / Rapido Map Picker View */}
+              {/* Interactive Corridor Map Picker View */}
               <RouteMapPicker
                 startLat={parseFloat(newStartLat) || 22.3085}
                 startLon={parseFloat(newStartLon) || 73.1732}
@@ -636,7 +636,7 @@ const Routes = () => {
                 disabled={isSubmitting}
                 className="w-full mt-2 bg-primary hover:bg-primary/90 text-white shadow-md font-semibold"
               >
-                {isSubmitting ? "Creating Route..." : "✨ Create Rapido-Style Route"}
+                {isSubmitting ? "Creating Route..." : "✨ Create Survey Route"}
               </Button>
             </div>
           </DialogContent>

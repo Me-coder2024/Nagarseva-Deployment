@@ -197,16 +197,40 @@ engineerRouter.put(
   },
 );
 
+import { optimizeEngineerRoute, calculateHaversineKm } from "../services/routeOptimizationService.js";
+
+engineerRouter.get(
+  "/optimized-route",
+  requireAuth,
+  requireRole("ENGINEER"),
+  async (req: Request, res: Response) => {
+    const engineerId = req.user!.userId;
+    const { lat, lon } = req.query;
+    try {
+      const originLat = lat ? parseFloat(lat as string) : undefined;
+      const originLon = lon ? parseFloat(lon as string) : undefined;
+      const routePlan = await optimizeEngineerRoute(engineerId, originLat, originLon);
+      return res.json({ success: true, data: routePlan });
+    } catch (err: any) {
+      console.error("Error optimizing engineer route:", err);
+      return res.status(500).json({
+        success: false,
+        message: err.message || "Failed to generate optimized route",
+      });
+    }
+  }
+);
+
 engineerRouter.put(
   "/solveIssue",
   requireAuth,
   requireRole("ENGINEER"),
   upload.single("afterImage"),
   async (req, res) => {
-    const { issueId } = req.body;
+    const { issueId, latitude, longitude, accuracy } = req.body;
     const engineerId = req.user!.userId;
     const file = req.file;
-    console.log("request reached in solveissue");
+    console.log("request reached in solveissue for issue:", issueId);
 
     if (!issueId || !engineerId) {
       return res
@@ -243,6 +267,23 @@ engineerRouter.put(
           .json({ success: false, message: "Issue must be IN_PROGRESS or ASSIGNED to be marked as fixed" });
       }
 
+      // Geo-fencing calculation & validation
+      let fixLat: number | undefined = undefined;
+      let fixLon: number | undefined = undefined;
+      let fixDistanceMeters: number | undefined = undefined;
+      let isGeofenceVerified = false;
+
+      if (latitude !== undefined && longitude !== undefined) {
+        fixLat = parseFloat(latitude);
+        fixLon = parseFloat(longitude);
+        if (!isNaN(fixLat) && !isNaN(fixLon)) {
+          const distKm = calculateHaversineKm(issue.latitude, issue.longitude, fixLat, fixLon);
+          fixDistanceMeters = Math.round(distKm * 1000 * 10) / 10;
+          // Accept within 35 meters (standard mobile GPS drift tolerance)
+          isGeofenceVerified = fixDistanceMeters <= 35.0;
+        }
+      }
+
       let afterUrl = "";
       if (hasValidCloudinaryConfig()) {
         try {
@@ -272,9 +313,43 @@ engineerRouter.put(
         },
       });
 
+      // Upsert IssueResolution record with geofence audit metrics
+      const existingRes = await prisma.issueResolution.findFirst({
+        where: { issueId },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (existingRes) {
+        await prisma.issueResolution.update({
+          where: { id: existingRes.id },
+          data: {
+            fixLatitude: fixLat ?? null,
+            fixLongitude: fixLon ?? null,
+            fixDistanceMeters: fixDistanceMeters ?? null,
+            isGeofenceVerified: isGeofenceVerified,
+          },
+        });
+      } else {
+        await prisma.issueResolution.create({
+          data: {
+            issueId: issueId as string,
+            fixLatitude: fixLat ?? null,
+            fixLongitude: fixLon ?? null,
+            fixDistanceMeters: fixDistanceMeters ?? null,
+            isGeofenceVerified: isGeofenceVerified,
+            approved: false,
+          },
+        });
+      }
+
       return res.json({
         success: true,
         data: updatedIssue,
+        geofence: {
+          isGeofenceVerified,
+          fixDistanceMeters,
+          toleranceMeters: 35.0,
+        },
       });
     } catch (error) {
       console.error("Error solving issue:", error);

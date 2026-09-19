@@ -28,7 +28,7 @@ frontend/
 │   │   └── NavLink.tsx        # Navigation link component
 │   ├── hooks/
 │   │   ├── useAuth.tsx        # Authentication hook (token, login/logout)
-│   │   ├── useMockData.ts     # Mock data for development
+│   │   ├── useData.ts         # Real-time NagarSeva data sync hooks
 │   │   ├── use-mobile.tsx     # Mobile breakpoint detection
 │   │   └── use-toast.ts      # Toast notification hook
 │   ├── lib/                   # Utility functions (cn, etc.)

@@ -9,10 +9,14 @@ import {
     ActivityIndicator,
     Alert,
     Image,
+    Modal,
+    Linking,
+    ScrollView,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import Geolocation from '@react-native-community/geolocation';
 import { Issue } from '../../types';
 import api from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
@@ -30,6 +34,9 @@ export function IssuesScreen() {
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [activeFilter, setActiveFilter] = useState<FilterTab>('ALL');
+    const [showRouteModal, setShowRouteModal] = useState(false);
+    const [isOptimizing, setIsOptimizing] = useState(false);
+    const [optimizedRoute, setOptimizedRoute] = useState<any>(null);
     const navigation = useNavigation<NavigationProp>();
     const { logout, user } = useAuth();
 
@@ -89,6 +96,43 @@ export function IssuesScreen() {
             const message = error.message || 'Failed to accept issue';
             Alert.alert('Error', message);
         }
+    };
+
+    const handleOptimizeRoute = async () => {
+        setIsOptimizing(true);
+        Geolocation.getCurrentPosition(
+            async (pos) => {
+                try {
+                    const res = await api.getOptimizedRoute(pos.coords.latitude, pos.coords.longitude);
+                    if (res && res.success && res.data) {
+                        setOptimizedRoute(res.data);
+                        setShowRouteModal(true);
+                    } else {
+                        Alert.alert('Notice', 'No active assigned issues found to optimize.');
+                    }
+                } catch (e: any) {
+                    Alert.alert('Error', 'Failed to generate optimized route.');
+                } finally {
+                    setIsOptimizing(false);
+                }
+            },
+            async (err) => {
+                try {
+                    const res = await api.getOptimizedRoute();
+                    if (res && res.success && res.data) {
+                        setOptimizedRoute(res.data);
+                        setShowRouteModal(true);
+                    } else {
+                        Alert.alert('Notice', 'No active assigned issues found to optimize.');
+                    }
+                } catch (e: any) {
+                    Alert.alert('Error', 'Failed to generate optimized route.');
+                } finally {
+                    setIsOptimizing(false);
+                }
+            },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 10000 }
+        );
     };
 
     const handleLogout = () => {
@@ -229,6 +273,31 @@ export function IssuesScreen() {
                         </View>
                     </View>
 
+                    {/* AI TSP Route Optimization Action Button */}
+                    <TouchableOpacity
+                        style={styles.optimizeRouteButton}
+                        onPress={handleOptimizeRoute}
+                        disabled={isOptimizing}
+                        activeOpacity={0.8}
+                    >
+                        {isOptimizing ? (
+                            <ActivityIndicator color={Colors.white} size="small" />
+                        ) : (
+                            <View style={styles.optimizeButtonContent}>
+                                <Text style={styles.optimizeButtonIcon}>🧭</Text>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.optimizeButtonTitle}>
+                                        AI Optimize Repair Route (TSP)
+                                    </Text>
+                                    <Text style={styles.optimizeButtonSubtitle}>
+                                        Generate optimal turn-by-turn sequence for active issues
+                                    </Text>
+                                </View>
+                                <Text style={styles.optimizeButtonArrow}>➔</Text>
+                            </View>
+                        )}
+                    </TouchableOpacity>
+
                     {/* Filter Tabs */}
                     <View style={styles.filterContainer}>
                         {(['ALL', 'ASSIGNED', 'IN_PROGRESS', 'FIXED', 'RESOLVED'] as FilterTab[]).map((filter) => (
@@ -279,6 +348,110 @@ export function IssuesScreen() {
                     }
                     showsVerticalScrollIndicator={false}
                 />
+
+                {/* AI TSP Route Optimization Modal */}
+                <Modal
+                    visible={showRouteModal}
+                    animationType="slide"
+                    transparent={true}
+                    onRequestClose={() => setShowRouteModal(false)}
+                >
+                    <View style={styles.routeModalOverlay}>
+                        <View style={styles.routeModalContent}>
+                            <View style={styles.routeModalHeader}>
+                                <View>
+                                    <Text style={styles.routeModalTitle}>🚀 Optimized Repair Route</Text>
+                                    <Text style={styles.routeModalSubtitle}>
+                                        {optimizedRoute?.totalStops || 0} stops sequenced with Traveling Salesperson AI
+                                    </Text>
+                                </View>
+                                <TouchableOpacity
+                                    onPress={() => setShowRouteModal(false)}
+                                    style={styles.routeModalClose}
+                                >
+                                    <Text style={styles.routeModalCloseText}>✕</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Efficiency & Duration Stats Banner */}
+                            {optimizedRoute && (
+                                <View style={styles.routeStatsBanner}>
+                                    <View style={styles.routeStatItem}>
+                                        <Text style={styles.routeStatVal}>{optimizedRoute.totalDistanceKm} km</Text>
+                                        <Text style={styles.routeStatLbl}>Trip Distance</Text>
+                                    </View>
+                                    <View style={styles.routeStatDivider} />
+                                    <View style={styles.routeStatItem}>
+                                        <Text style={styles.routeStatVal}>{optimizedRoute.estimatedTotalDurationMinutes} min</Text>
+                                        <Text style={styles.routeStatLbl}>Est. Duration</Text>
+                                    </View>
+                                    <View style={styles.routeStatDivider} />
+                                    <View style={styles.routeStatItem}>
+                                        <Text style={[styles.routeStatVal, { color: Colors.success }]}>
+                                            +{optimizedRoute.efficiencyImprovementPct}%
+                                        </Text>
+                                        <Text style={styles.routeStatLbl}>Fuel Savings</Text>
+                                    </View>
+                                </View>
+                            )}
+
+                            {/* Turn-by-Turn Full Route Navigation Button */}
+                            {optimizedRoute?.googleMapsTurnByTurnUrl && (
+                                <TouchableOpacity
+                                    style={styles.fullNavButton}
+                                    onPress={() => {
+                                        Linking.openURL(optimizedRoute.googleMapsTurnByTurnUrl).catch(() => {
+                                            Alert.alert('Error', 'Could not launch Google Maps navigation');
+                                        });
+                                    }}
+                                    activeOpacity={0.8}
+                                >
+                                    <Text style={styles.fullNavButtonText}>🗺️ Open Full Route in Google Maps</Text>
+                                </TouchableOpacity>
+                            )}
+
+                            {/* Ordered Waypoints List */}
+                            <ScrollView
+                                style={styles.routeStopsScroll}
+                                showsVerticalScrollIndicator={false}
+                            >
+                                <Text style={styles.routeStopsHeading}>Turn-by-Turn Waypoint Sequence</Text>
+                                {optimizedRoute?.stops?.map((stop: any) => (
+                                    <View key={stop.stopNumber} style={styles.stopCard}>
+                                        <View style={styles.stopNumberBadge}>
+                                            <Text style={styles.stopNumberText}>#{stop.stopNumber}</Text>
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <View style={styles.stopHeaderRow}>
+                                                <Text style={styles.stopType}>{stop.type}</Text>
+                                                <Text style={styles.stopDist}>+{stop.distanceFromPrevKm} km</Text>
+                                            </View>
+                                            <Text style={styles.stopLocation}>
+                                                {stop.wardName} &bull; {stop.routeName}
+                                            </Text>
+                                            <Text style={styles.stopEta}>
+                                                ~{stop.estimatedTransitMinutes} mins travel time
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.stopNavButton}
+                                            onPress={() => {
+                                                if (stop.navigationUrl) {
+                                                    Linking.openURL(stop.navigationUrl).catch(() => {
+                                                        Alert.alert('Error', 'Could not open navigation');
+                                                    });
+                                                }
+                                            }}
+                                        >
+                                            <Text style={styles.stopNavIcon}>🧭</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                ))}
+                                <View style={{ height: 30 }} />
+                            </ScrollView>
+                        </View>
+                    </View>
+                </Modal>
             </View>
         </SafeAreaView>
     );
@@ -505,5 +678,183 @@ const styles = StyleSheet.create({
     emptySubtext: {
         fontSize: Typography.fontSize.sm,
         color: Colors.muted,
+    },
+    optimizeRouteButton: {
+        backgroundColor: '#4338ca', // Indigo-700
+        borderRadius: BorderRadius.lg,
+        padding: Spacing.md,
+        marginTop: Spacing.md,
+        shadowColor: '#4338ca',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    optimizeButtonContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    optimizeButtonIcon: {
+        fontSize: 22,
+    },
+    optimizeButtonTitle: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.white,
+    },
+    optimizeButtonSubtitle: {
+        fontSize: Typography.fontSize.xs,
+        color: '#c7d2fe',
+        marginTop: 1,
+    },
+    optimizeButtonArrow: {
+        fontSize: 16,
+        color: Colors.white,
+        fontWeight: 'bold',
+    },
+    // Route Modal Styles
+    routeModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        justifyContent: 'flex-end',
+    },
+    routeModalContent: {
+        backgroundColor: Colors.white,
+        borderTopLeftRadius: BorderRadius.xl,
+        borderTopRightRadius: BorderRadius.xl,
+        padding: Spacing.lg,
+        maxHeight: '85%',
+    },
+    routeModalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        paddingBottom: Spacing.md,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.border,
+    },
+    routeModalTitle: {
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.foreground,
+    },
+    routeModalSubtitle: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.muted,
+        marginTop: 2,
+    },
+    routeModalClose: {
+        padding: Spacing.xs,
+    },
+    routeModalCloseText: {
+        fontSize: Typography.fontSize.lg,
+        color: Colors.muted,
+        fontWeight: 'bold',
+    },
+    routeStatsBanner: {
+        flexDirection: 'row',
+        backgroundColor: Colors.accent,
+        borderRadius: BorderRadius.lg,
+        padding: Spacing.md,
+        marginVertical: Spacing.md,
+        justifyContent: 'space-around',
+        alignItems: 'center',
+    },
+    routeStatItem: {
+        alignItems: 'center',
+    },
+    routeStatVal: {
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.foreground,
+    },
+    routeStatLbl: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.muted,
+        marginTop: 2,
+    },
+    routeStatDivider: {
+        width: 1,
+        height: 24,
+        backgroundColor: Colors.border,
+    },
+    fullNavButton: {
+        backgroundColor: Colors.primary,
+        borderRadius: BorderRadius.lg,
+        paddingVertical: Spacing.md,
+        alignItems: 'center',
+        marginBottom: Spacing.md,
+    },
+    fullNavButtonText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    routeStopsScroll: {
+        maxHeight: 320,
+    },
+    routeStopsHeading: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.foreground,
+        marginBottom: Spacing.sm,
+    },
+    stopCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: Spacing.md,
+        backgroundColor: Colors.backgroundSecondary,
+        borderRadius: BorderRadius.lg,
+        marginBottom: Spacing.sm,
+        gap: Spacing.md,
+    },
+    stopNumberBadge: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#4338ca',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    stopNumberText: {
+        color: Colors.white,
+        fontWeight: 'bold',
+        fontSize: Typography.fontSize.xs,
+    },
+    stopHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    stopType: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.foreground,
+    },
+    stopDist: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.primary,
+    },
+    stopLocation: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.muted,
+        marginTop: 2,
+    },
+    stopEta: {
+        fontSize: 10,
+        color: '#6b7280',
+        marginTop: 2,
+    },
+    stopNavButton: {
+        padding: Spacing.sm,
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.md,
+        borderWidth: 1,
+        borderColor: Colors.border,
+    },
+    stopNavIcon: {
+        fontSize: 18,
     },
 });

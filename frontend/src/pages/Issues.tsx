@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { useIssues, useEngineers, useWards } from "@/hooks/useMockData";
+import { useIssues, useEngineers, useWards } from "@/hooks/useData";
 import { IssueCard } from "@/components/issues/IssueCard";
 import { IssueFilters } from "@/components/issues/IssueFilters";
 import { AssignEngineerDialog } from "@/components/issues/AssignEngineerDialog";
@@ -257,6 +257,8 @@ const Issues = () => {
           filters={filters}
           onFiltersChange={setFilters}
           wards={wards || []}
+          totalCount={issues?.length || 0}
+          filteredCount={filteredIssues.length}
         />
 
         {/* Grid View */}

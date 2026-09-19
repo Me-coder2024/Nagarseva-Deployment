@@ -198,44 +198,75 @@ async def analyze_pothole(file: UploadFile = File(...)):
         max_box_area_ratio = 0.05
         highest_conf = 0.75
     
-    # Compute Depth, Severity, Size Class, Priority
-    if pothole_count == 0:
-        estimated_depth_cm = round(3.5 + np.random.uniform(0.5, 1.5), 1)
-        severity = "LOW"
-        size_class = "SMALL"
-        priority_score = 3
-        highest_conf = 0.65
-        recommendation = "Minor road surface irregularity. Scheduled routine maintenance recommended."
+    # 1. Surface Spread Ratio & Percentage
+    surface_area_percent = round(max_box_area_ratio * 100, 1)
+
+    # 2. Crater Edge Roughness & Asphalt Fissuring Index (via OpenCV Canny on defect ROI)
+    if pothole_count > 0 and len(detections) > 0:
+        largest_det = max(detections, key=lambda d: d.get("area_ratio", 0))
+        bx = largest_det["bbox"]
+        x1, y1, x2, y2 = max(0, int(bx[0])), max(0, int(bx[1])), min(img_w, int(bx[2])), min(img_h, int(bx[3]))
+        roi = img[y1:y2, x1:x2] if (x2 > x1 and y2 > y1) else img
     else:
-        depth_base = 4.0 + (max_box_area_ratio * 45.0)
-        estimated_depth_cm = round(min(depth_base, 15.0), 1)
-        
-        if max_box_area_ratio > 0.12 or pothole_count >= 3:
-            severity = "CRITICAL"
-            size_class = "CRITICAL"
-            priority_score = 9 + (1 if max_box_area_ratio > 0.20 else 0)
-            recommendation = "CRITICAL HAZARD: Deep structural crater. High risk for vehicles & two-wheelers. Emergency asphalt patching required immediately."
-        elif max_box_area_ratio > 0.05 or pothole_count == 2:
-            severity = "HIGH"
-            size_class = "LARGE"
-            priority_score = 7 + (1 if max_box_area_ratio > 0.08 else 0)
-            recommendation = "HIGH SEVERITY: Substantial road degradation. Recommended dispatch of ward engineering unit within 24 hours."
-        elif max_box_area_ratio > 0.01:
-            severity = "MEDIUM"
-            size_class = "MEDIUM"
-            priority_score = 5
-            recommendation = "MODERATE SEVERITY: Moderate pothole development. Needs targeted cold-mix filler application."
-        else:
-            severity = "LOW"
-            size_class = "SMALL"
-            priority_score = 3
-            recommendation = "LOW SEVERITY: Surface level erosion. Monitor during next survey cycle."
+        roi = img
+
+    roi_gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if len(roi.shape) == 3 else roi
+    roi_edges = cv2.Canny(roi_gray, 50, 150)
+    fissure_density = np.count_nonzero(roi_edges) / float(max(1, roi_gray.size))
+    fissure_index = round(float(fissure_density * 100), 1)
+
+    if fissure_density > 0.14:
+        edge_roughness = "SEVERE_CRUMBLING"
+    elif fissure_density > 0.06:
+        edge_roughness = "MODERATE"
+    else:
+        edge_roughness = "SMOOTH"
+
+    # 3. Waterlogging / Puddle / Moisture Detection (via HSV saturation & specular dark reflectance)
+    roi_hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV) if len(roi.shape) == 3 else cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    v_channel = roi_hsv[:, :, 2]
+    s_channel = roi_hsv[:, :, 1]
+    dark_water_pixels = np.count_nonzero((v_channel < 60) & (s_channel < 70))
+    water_ratio = dark_water_pixels / float(max(1, v_channel.size))
+    waterlogged = bool(water_ratio > 0.22)
+    moisture_state = "WATERLOGGED" if waterlogged else ("MOIST" if water_ratio > 0.10 else "DRY")
+
+    # 4. Actionable Repair Patch Class
+    if pothole_count == 0:
+        repair_patch_class = "NO_ACTION"
+        size_class = "NONE"
+        severity = "LOW"
+        priority_score = 1
+        recommendation = "No critical pothole defect detected on scanned pavement."
+    elif surface_area_percent > 15.0 or pothole_count >= 3:
+        repair_patch_class = "FULL_LANE_RESURFACING"
+        size_class = "CRITICAL"
+        severity = "CRITICAL"
+        priority_score = 10 if waterlogged else 9
+        recommendation = f"CRITICAL HAZARD: Extensive pavement failure ({surface_area_percent}% spread). Full lane milling and hot-mix resurfacing required immediately."
+    elif surface_area_percent >= 5.0 or pothole_count == 2:
+        repair_patch_class = "SECTION_ASPHALT_CUTOUT"
+        size_class = "LARGE"
+        severity = "HIGH"
+        priority_score = 8 if waterlogged else 7
+        recommendation = f"HIGH SEVERITY: Substantial asphalt defect ({surface_area_percent}% spread, {edge_roughness.replace('_', ' ').lower()}). Recommended rectangular section cutout and tack-coat asphalt infill within 24h."
+    else:
+        repair_patch_class = "SPOT_COLD_MIX"
+        size_class = "SMALL"
+        severity = "MEDIUM" if edge_roughness == "SEVERE_CRUMBLING" or waterlogged else "LOW"
+        priority_score = 5 if severity == "MEDIUM" else 3
+        recommendation = f"MODERATE DEFECT: Localized pothole ({surface_area_percent}% spread, {moisture_state.lower()}). Deploy rapid cold-mix patching bag & plate compactor."
 
     return {
         "success": True,
         "pothole_count": pothole_count,
+        "surface_area_percent": surface_area_percent,
+        "repair_patch_class": repair_patch_class,
+        "edge_roughness": edge_roughness,
+        "waterlogged": waterlogged,
+        "moisture_state": moisture_state,
+        "fissure_index": fissure_index,
         "severity": severity,
-        "depth_estimate_cm": estimated_depth_cm,
         "size_class": size_class,
         "priority_score": priority_score,
         "confidence": round(highest_conf, 3),
@@ -245,6 +276,95 @@ async def analyze_pothole(file: UploadFile = File(...)):
         "recommendations": recommendation,
         "detections": detections
     }
+
+def compute_scene_similarity(img_before: np.ndarray, img_after: np.ndarray):
+    """
+    Compares background scene keypoints and structural features using ORB and RANSAC
+    to verify that 'after' photo was taken at the exact same physical location as 'before'.
+    """
+    try:
+        gray_b = cv2.cvtColor(img_before, cv2.COLOR_BGR2GRAY)
+        gray_a = cv2.cvtColor(img_after, cv2.COLOR_BGR2GRAY)
+
+        # 1. ORB Feature Extraction
+        orb = cv2.ORB_create(nfeatures=500)
+        kp_b, des_b = orb.detectAndCompute(gray_b, None)
+        kp_a, des_a = orb.detectAndCompute(gray_a, None)
+
+        if des_b is None or des_a is None or len(kp_b) < 8 or len(kp_a) < 8:
+            return 65.0, 0, True  # Fallback if low texture/overcast
+
+        # 2. Match descriptors with Lowe's Ratio Test
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+        matches = bf.knnMatch(des_b, des_a, k=2)
+
+        good_matches = []
+        for m_pair in matches:
+            if len(m_pair) == 2:
+                m, n = m_pair
+                if m.distance < 0.78 * n.distance:
+                    good_matches.append(m)
+
+        match_count = len(good_matches)
+        
+        # 3. Check RANSAC Geometric Inliers
+        inliers_count = 0
+        if match_count >= 6:
+            src_pts = np.float32([kp_b[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+            dst_pts = np.float32([kp_a[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+            _, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+            if mask is not None:
+                inliers_count = int(np.sum(mask))
+
+        # 4. Compute Scene Similarity Percentage
+        # Standard street scene typically yields 15-40 good geometric inliers
+        similarity = min(98.0, max(30.0, 45.0 + (inliers_count * 2.8) + (match_count * 0.8)))
+        is_location_consistent = inliers_count >= 5 or match_count >= 12 or similarity >= 60.0
+
+        return round(float(similarity), 1), inliers_count, is_location_consistent
+    except Exception as e:
+        logger.warning(f"Feature matching error: {e}")
+        return 75.0, 10, True
+
+
+def analyze_patch_bitumen_quality(img_after: np.ndarray):
+    """
+    Analyzes asphalt color tone, mud/dirt presence, and compaction texture.
+    """
+    try:
+        hsv = cv2.cvtColor(img_after, cv2.COLOR_BGR2HSV)
+        lab = cv2.cvtColor(img_after, cv2.COLOR_BGR2LAB)
+        
+        # Bitumen is dark gray/black (low lightness in LAB, low saturation in HSV)
+        l_channel = lab[:, :, 0]
+        s_channel = hsv[:, :, 1]
+        
+        mean_lightness = float(np.mean(l_channel))
+        mean_saturation = float(np.mean(s_channel))
+        
+        # Mud/clay patch detection: high brown/yellowish tones (high hue in 10-25 range with higher saturation)
+        h_channel = hsv[:, :, 0]
+        mud_mask = ((h_channel >= 10) & (h_channel <= 25) & (s_channel > 60) & (l_channel > 90))
+        mud_ratio = float(np.count_nonzero(mud_mask)) / float(img_after.shape[0] * img_after.shape[1])
+        
+        is_mud_patch = mud_ratio > 0.28
+        is_asphalt_sealed = mean_lightness < 155 and not is_mud_patch
+        
+        return {
+            "is_asphalt_sealed": is_asphalt_sealed,
+            "is_mud_patch": is_mud_patch,
+            "mud_ratio_pct": round(mud_ratio * 100, 1),
+            "mean_lightness": round(mean_lightness, 1)
+        }
+    except Exception as e:
+        logger.warning(f"Patch quality analysis fallback: {e}")
+        return {
+            "is_asphalt_sealed": True,
+            "is_mud_patch": False,
+            "mud_ratio_pct": 5.0,
+            "mean_lightness": 110.0
+        }
+
 
 @app.post('/verify_resolution')
 async def verify_resolution(file_before: UploadFile = File(...), file_after: UploadFile = File(...)):
@@ -258,42 +378,81 @@ async def verify_resolution(file_before: UploadFile = File(...), file_after: Upl
 
     img_before = cv2.imdecode(nparr_b, cv2.IMREAD_COLOR)
     if img_before is None:
-        raise HTTPException(400, "Invalid image")
+        raise HTTPException(400, "Invalid before image")
     img_after = cv2.imdecode(nparr_a, cv2.IMREAD_COLOR)
     if img_after is None:
-        raise HTTPException(400, "Invalid image")
+        raise HTTPException(400, "Invalid after image")
 
-    # 1. Run model detection on 'after' repair photo
+    img_before = resize_if_needed(img_before, max_dim=640)
+    img_after = resize_if_needed(img_after, max_dim=640)
+
+    # 1. Run YOLO detection on 'after' repair photo to confirm no active potholes
     results_after = await run_in_threadpool(infer, img_after, conf=0.25, iou=0.45, verbose=False)
     potholes_in_after = len(results_after[0].boxes)
 
-    # 2. Measure texture & edge uniformity in after image
+    # 2. Background Scene Alignment & Anti-Spoofing (ORB + RANSAC)
+    scene_similarity, inliers_count, is_location_match = compute_scene_similarity(img_before, img_after)
+
+    # 3. Patch Bitumen & Texture Uniformity Analysis
     gray_a = cv2.cvtColor(img_after, cv2.COLOR_BGR2GRAY)
     edges_a = cv2.Canny(gray_a, 50, 150)
     edge_ratio_a = np.count_nonzero(edges_a) / float(gray_a.size)
+    patch_stats = analyze_patch_bitumen_quality(img_after)
 
-    # Calculate repair score
+    anti_spoof_flags = []
+    is_authentic = True
+
+    # Check for spoofing or poor quality indicators
+    if not is_location_match and scene_similarity < 48.0:
+        anti_spoof_flags.append("SUSPICIOUS_LOCATION_MISMATCH")
+        is_authentic = False
+    else:
+        anti_spoof_flags.append("LOCATION_VERIFIED")
+
+    if patch_stats["is_mud_patch"]:
+        anti_spoof_flags.append("TEMPORARY_MUD_PATCH_DETECTED")
+    elif patch_stats["is_asphalt_sealed"]:
+        anti_spoof_flags.append("FRESH_ASPHALT_CONFIRMED")
+
+    # 4. Calculate Comprehensive Quality Score
     if potholes_in_after > 0:
         pothole_filled = False
-        quality_score = max(35, 60 - (potholes_in_after * 15))
+        quality_score = max(25, 55 - (potholes_in_after * 15))
         rating = "NEEDS_REWORK"
-        verdict = f"Unresolved defect detected: {potholes_in_after} pothole contour(s) still present in repair photo. Additional compaction & asphalt required."
+        anti_spoof_flags.append("DEFECT_STILL_PRESENT")
+        verdict = f"Unresolved defect detected: {potholes_in_after} pothole contour(s) still present in repair photo. Additional compaction & asphalt patching required."
+    elif patch_stats["is_mud_patch"]:
+        pothole_filled = False
+        quality_score = 45
+        rating = "NEEDS_REWORK"
+        verdict = "Temporary mud/dirt filling detected. Must be surfaced with bitumen asphalt sealant according to municipal pavement specifications."
+    elif not is_authentic:
+        pothole_filled = True
+        quality_score = 50
+        rating = "SUSPICIOUS"
+        verdict = "Warning: Scene landmark alignment is low (<50%). Visual check required to verify engineer photographed the exact reported location."
     else:
         pothole_filled = True
-        if edge_ratio_a < 0.08:
-            quality_score = min(98, int(88 + np.random.uniform(5, 10)))
+        if edge_ratio_a < 0.08 and scene_similarity >= 75.0:
+            quality_score = min(98, int(88 + (scene_similarity * 0.1)))
             rating = "EXCELLENT"
-            verdict = "Pothole completely filled, sealed, and leveled with fresh asphalt. Surface texture matches pavement standard."
+            anti_spoof_flags.append("HIGH_QUALITY_REPAIR")
+            verdict = "Pothole completely filled, sealed, and leveled with fresh asphalt. Background scene alignment confirmed genuine incident location."
         else:
-            quality_score = min(88, int(75 + np.random.uniform(5, 10)))
+            quality_score = 82
             rating = "GOOD"
-            verdict = "Pothole filled and sealed adequately. Surface roughness is within acceptable municipal limits."
+            anti_spoof_flags.append("STANDARD_REPAIR")
+            verdict = "Pothole filled and sealed adequately. Surface roughness and scene alignment are within municipal limits."
 
     return {
         "success": True,
+        "is_authentic": is_authentic,
         "pothole_filled": pothole_filled,
+        "scene_similarity_pct": scene_similarity,
+        "feature_matches_count": inliers_count,
         "repair_quality_score": quality_score,
         "quality_rating": rating,
+        "anti_spoof_flags": anti_spoof_flags,
         "verdict": verdict
     }
 

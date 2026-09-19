@@ -74,7 +74,7 @@ export function ChatBot() {
       const { data } = await api.post("/api/chat/ask", {
         question: userMessage.content,
         language: chatLanguage,
-      }, { timeout: 150000 });
+      }, { timeout: 20000 });
 
       // Extract the actual text content from the API response
       // API returns: { result: { content: "...", ... }, question: "..." }
@@ -95,7 +95,7 @@ export function ChatBot() {
         id: (Date.now() + 1).toString(),
         role: "assistant",
         content:
-          "Sorry, I encountered an error while processing your request. Please try again.",
+          "I experienced a temporary connection delay. Please ask your question again, or try one of the suggestions like **'How many open issues are there?'** or **'Show me issues by ward'**.",
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);

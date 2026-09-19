@@ -668,9 +668,12 @@ surveyorRouter.post(
             data: {
               issueId: issue.id,
               severity: aiData.severity || "MEDIUM",
-              depthEstimateCm: aiData.depth_estimate_cm || 5.2,
+              surfaceAreaPercent: aiData.surface_area_percent ?? 0,
+              repairPatchClass: aiData.repair_patch_class || "SPOT_COLD_MIX",
+              edgeRoughness: aiData.edge_roughness || "SMOOTH",
+              waterlogged: aiData.waterlogged ?? false,
               sizeClass: aiData.size_class || "MEDIUM",
-              priorityScore: aiData.priority_score || 6,
+              priorityScore: aiData.priority_score || 5,
               recommendations: aiData.recommendations || "Routine asphalt patching recommended.",
             }
           });

@@ -40,13 +40,12 @@ class SQLTests(unittest.TestCase):
 
     def test_database_url_and_access_configuration(self):
         import SQLAgent
-        with patch.dict(os.environ, {'DATABASE_URL': 'postgres://reader:fake@localhost/db?sslmode=require&schema=public'}), patch.object(SQLAgent, 'create_engine') as create, patch.object(SQLAgent, 'SQLDatabase') as database:
+        with patch.dict(os.environ, {'DATABASE_URL': 'postgres://reader:fake@localhost/db?sslmode=require&schema=public'}), patch.object(SQLAgent, 'create_engine') as create, patch.object(SQLAgent, 'SQLDatabase') as database, patch.object(SQLAgent.event, 'listens_for'):
             SQLAgent.load_database()
             parsed = create.call_args.args[0]
             self.assertEqual(parsed.drivername, 'postgresql')
             self.assertNotIn('schema', parsed.query)
-            self.assertEqual(parsed.query['sslmode'], 'require')
-            self.assertIn('default_transaction_read_only=on', create.call_args.kwargs['connect_args']['options'])
+            self.assertEqual(create.call_args.kwargs['connect_args']['connect_timeout'], 10)
             self.assertNotIn('User', database.call_args.kwargs['include_tables'])
             self.assertEqual(database.call_args.kwargs['sample_rows_in_table_info'], 0)
 

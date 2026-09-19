@@ -88,7 +88,7 @@ export default function DashboardScreen() {
                                 item.capturedAt,
                                 item.id
                             );
-                            return { success: r.success, message: r.message, httpStatus: r.httpStatus };
+                            return { success: !!(r && r.success), message: r?.message, httpStatus: r?.httpStatus };
                         } else {
                             const r = await api.uploadFrames(
                                 item.frames,
@@ -99,7 +99,7 @@ export default function DashboardScreen() {
                                 item.latitude,
                                 item.longitude
                             );
-                            return { success: r.success };
+                            return { success: !!(r && r.success) };
                         }
                     } catch (e: any) {
                         return { success: false, message: e?.message };
@@ -107,7 +107,7 @@ export default function DashboardScreen() {
                 });
             } finally {
                 setIsSyncing(false);
-                const remaining = await offlineQueue.getTotalPendingPhotosCount();
+                const remaining = await offlineQueue.getTotalPendingPhotosCount().catch(() => 0);
                 setOfflineCount(remaining);
             }
         }
@@ -117,7 +117,7 @@ export default function DashboardScreen() {
         setIsSyncing(true);
         try {
             await offlineQueue.resumeQueue();
-            const res = await offlineQueue.syncQueue(async (item) => {
+            const res = (await offlineQueue.syncQueue(async (item) => {
                 try {
                     if (item.frames && item.frames.length === 1) {
                         const r = await api.reportDetection(
@@ -134,7 +134,7 @@ export default function DashboardScreen() {
                             item.capturedAt,
                             item.id
                         );
-                        return { success: r.success, message: r.message, httpStatus: r.httpStatus };
+                        return { success: !!(r && r.success), message: r?.message, httpStatus: r?.httpStatus };
                     } else {
                         const r = await api.uploadFrames(
                             item.frames,
@@ -145,23 +145,26 @@ export default function DashboardScreen() {
                             item.latitude,
                             item.longitude
                         );
-                        return { success: r.success };
+                        return { success: !!(r && r.success) };
                     }
                 } catch (e: any) {
                     return { success: false, message: e?.message };
                 }
-            }, true);
+            }, true)) || { synced: 0, remaining: 0, failed: 0 };
 
-            const remaining = await offlineQueue.getTotalPendingPhotosCount();
+            const remaining = await offlineQueue.getTotalPendingPhotosCount().catch(() => 0);
             setOfflineCount(remaining);
             checkActiveUpload();
 
-            if (res.synced > 0) {
+            const syncedCount = res?.synced ?? 0;
+            const remainingCount = res?.remaining ?? remaining;
+
+            if (syncedCount > 0) {
                 Alert.alert(
                     '✅ Sync Complete',
-                    `Successfully uploaded ${res.synced} photo(s) to server. Issues are now live on Admin Dashboard!`
+                    `Successfully uploaded ${syncedCount} photo(s) to server. Issues are now live on Admin Dashboard!`
                 );
-            } else if (remaining === 0) {
+            } else if (remainingCount === 0) {
                 Alert.alert(
                     '☁️ Synced',
                     'All survey photos and assignments are fully up to date with the server.'
@@ -169,7 +172,7 @@ export default function DashboardScreen() {
             } else {
                 Alert.alert(
                     '⚠️ Sync Incomplete',
-                    `${res.remaining} photo(s) still queued. Please check your internet connection.`
+                    `${remainingCount} photo(s) still queued. Please check your internet connection.`
                 );
             }
         } catch (err: any) {
