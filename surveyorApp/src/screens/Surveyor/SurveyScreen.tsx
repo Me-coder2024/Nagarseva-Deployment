@@ -285,33 +285,8 @@ export default function SurveyScreen() {
                 : rawPath.startsWith('/')
                     ? `file://${rawPath}`
                     : `file:///${rawPath}`;
-            
-            // CRITICAL: Always request fresh GPS for each individual detection
-            // DO NOT use cached GPS - this was causing all detections to have the same location
-            const gpsStartTime = Date.now();
-            console.log(`[DETECTION detectionId=${detectionId}] Requesting fresh GPS...`);
-            const gpsSnapshot = await getLiveCoordinates(detectionId);
-            const gpsElapsedMs = Date.now() - gpsStartTime;
-            console.log(`[TIMING detectionId=${detectionId}] getLiveCoordinates() resolved in ${gpsElapsedMs}ms (total from takePhoto: ${Date.now() - photoStartTime}ms)`);
-            
-            if (!gpsSnapshot || !gpsSnapshot.latitude || !gpsSnapshot.longitude) {
-                console.warn(`[DETECTION detectionId=${detectionId}] Frame capture skipped: Device GPS position not yet locked`);
-                return;
-            }
 
-            if (gpsSnapshot.accuracy && gpsSnapshot.accuracy > MAX_ACCEPTABLE_GPS_ACCURACY) {
-                console.warn(`[GPS detectionId=${detectionId}] Detection skipped due to weak accuracy: ±${Math.round(gpsSnapshot.accuracy)}m > ${MAX_ACCEPTABLE_GPS_ACCURACY}m`);
-                return;
-            }
-
-            const gpsAge = gpsSnapshot.timestamp ? Date.now() - gpsSnapshot.timestamp : 'unknown';
-            
-            // Increment the session GPS detection counter for the on-screen debug panel
-            setGpsDetectionCount(prev => prev + 1);
-
-            console.log(`[DETECTION ID: ${detectionId}] Pothole detected: lat=${gpsSnapshot.latitude.toFixed(6)}, lng=${gpsSnapshot.longitude.toFixed(6)}, accuracy=${gpsSnapshot.accuracy}m, age=${gpsAge}ms, photoMs=${photoElapsedMs}, gpsMs=${gpsElapsedMs}`);
-
-            // Analyze frame with native AI Pothole Detection model
+            // Analyze frame FIRST with native AI Pothole Detection model for sub-50ms check
             let detectionResult: { detected: boolean; confidence: number; bbox?: number[] } = { detected: false, confidence: 0 };
 
             if (PotholeDetector && PotholeDetector.detectFrame) {
@@ -325,14 +300,43 @@ export default function SurveyScreen() {
                 detectionResult = { detected: true, confidence: 0.88 };
             }
 
-            if (detectionResult.detected) {
-                // 🕳️ POTHOLE DETECTED BY MODEL! Save photo to queue
-                triggerDetectionFlash();
+            if (!detectionResult.detected) {
+                // 🟢 ROAD IS CLEAR! Do NOT block waiting for GPS; release immediately
                 setLastDetectionStatus({
-                    status: 'POTHOLE_DETECTED',
-                    confidence: Math.round((detectionResult.confidence || 0.90) * 100),
-                    bbox: detectionResult.bbox,
+                    status: 'CLEAR',
+                    confidence: 0,
                 });
+                return;
+            }
+
+            // 🕳️ POTHOLE DETECTED BY MODEL! Immediate visual feedback
+            triggerDetectionFlash();
+            setLastDetectionStatus({
+                status: 'POTHOLE_DETECTED',
+                confidence: Math.round((detectionResult.confidence || 0.90) * 100),
+                bbox: detectionResult.bbox,
+            });
+
+            // Fetch live GPS for the detected pothole
+            const gpsStartTime = Date.now();
+            console.log(`[DETECTION detectionId=${detectionId}] Requesting GPS for detected pothole...`);
+            const gpsSnapshot = await getLiveCoordinates(detectionId);
+            const gpsElapsedMs = Date.now() - gpsStartTime;
+            console.log(`[TIMING detectionId=${detectionId}] getLiveCoordinates() resolved in ${gpsElapsedMs}ms`);
+
+            if (!gpsSnapshot || !gpsSnapshot.latitude || !gpsSnapshot.longitude) {
+                console.warn(`[DETECTION detectionId=${detectionId}] Frame capture skipped: Device GPS position not yet locked`);
+                return;
+            }
+
+            if (gpsSnapshot.accuracy && gpsSnapshot.accuracy > MAX_ACCEPTABLE_GPS_ACCURACY) {
+                console.warn(`[GPS detectionId=${detectionId}] Detection skipped due to weak accuracy: ±${Math.round(gpsSnapshot.accuracy)}m > ${MAX_ACCEPTABLE_GPS_ACCURACY}m`);
+                return;
+            }
+
+            const gpsAge = gpsSnapshot.timestamp ? Date.now() - gpsSnapshot.timestamp : 'unknown';
+            setGpsDetectionCount(prev => prev + 1);
+            console.log(`[DETECTION ID: ${detectionId}] Pothole confirmed: lat=${gpsSnapshot.latitude.toFixed(6)}, lng=${gpsSnapshot.longitude.toFixed(6)}, accuracy=${gpsSnapshot.accuracy}m`);
 
                 let photoBase64: string | undefined = undefined;
                 if (PotholeDetector && PotholeDetector.getBase64) {
@@ -408,13 +412,6 @@ export default function SurveyScreen() {
                 setTimeout(() => {
                     setLastDetectionStatus(prev => prev.status === 'POTHOLE_DETECTED' ? { status: 'SCANNING', confidence: 0 } : prev);
                 }, 2500);
-            } else {
-                // 🟢 ROAD IS CLEAR! Do NOT capture/save image
-                setLastDetectionStatus({
-                    status: 'CLEAR',
-                    confidence: 0,
-                });
-            }
         } catch (err) {
             console.log('AI scan tick skipped:', err);
         } finally {

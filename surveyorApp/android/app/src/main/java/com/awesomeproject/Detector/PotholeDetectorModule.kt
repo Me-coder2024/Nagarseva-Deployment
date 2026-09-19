@@ -26,7 +26,24 @@ class PotholeDetectorModule(reactContext: ReactApplicationContext) : ReactContex
                 return
             }
 
-            val bitmap = BitmapFactory.decodeFile(file.absolutePath)
+            // Downsample image for fast near-instant analysis (640px width target)
+            val boundsOptions = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            BitmapFactory.decodeFile(file.absolutePath, boundsOptions)
+
+            var sampleSize = 1
+            val targetWidth = 640
+            if (boundsOptions.outWidth > targetWidth) {
+                sampleSize = max(1, boundsOptions.outWidth / targetWidth)
+            }
+
+            val decodeOptions = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+
+            val bitmap = BitmapFactory.decodeFile(file.absolutePath, decodeOptions)
             if (bitmap == null) {
                 val map = Arguments.createMap()
                 map.putBoolean("detected", false)
@@ -35,8 +52,9 @@ class PotholeDetectorModule(reactContext: ReactApplicationContext) : ReactContex
                 return
             }
 
-            // Perform fast on-device analysis on bitmap pixels
+            // Perform fast on-device analysis on downsampled bitmap pixels
             val result = analyzeBitmapForPotholes(bitmap)
+            bitmap.recycle()
             promise.resolve(result)
 
         } catch (e: Exception) {
