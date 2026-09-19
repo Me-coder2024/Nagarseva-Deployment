@@ -41,8 +41,8 @@ function calculateHaversineDistance(lat1: number, lon1: number, lat2: number, lo
 
 const { FrameExtractor, PotholeDetector } = NativeModules;
 
-const MAX_ACCEPTABLE_GPS_ACCURACY = 50; // Maximum acceptable GPS accuracy in meters
-const MAX_LOCATION_AGE_MS = 10000; // Maximum acceptable GPS age in milliseconds (10 seconds)
+const MAX_ACCEPTABLE_GPS_ACCURACY = 150; // Maximum acceptable GPS accuracy in meters
+const MAX_LOCATION_AGE_MS = 60000; // Maximum acceptable GPS age in milliseconds (60 seconds)
 
 export interface ReviewPhoto {
     id: string;
@@ -87,8 +87,10 @@ export default function SurveyScreen() {
                     if (Array.isArray(saved) && saved.length > 0) {
                         setReviewPhotos(saved);
                         setIssuesDetected(saved.length);
-                        setShowReviewScreen(true);
-                        return;
+                        // Only open review screen if specifically requested via route param
+                        if (route.params && (route.params as any).showReview) {
+                            setShowReviewScreen(true);
+                        }
                     }
                 } catch (e) {
                     console.error('Failed to parse saved review photos', e);
@@ -97,8 +99,9 @@ export default function SurveyScreen() {
 
             // If pickFromGallery param is passed, open gallery immediately
             if (route.params && (route.params as any).pickFromGallery) {
+                setShowReviewScreen(true);
                 setTimeout(() => {
-                    handlePickYesterdayPhotosFromGallery();
+                    handlePickPhotosFromGallery();
                 }, 300);
             }
         });
@@ -156,9 +159,10 @@ export default function SurveyScreen() {
 
     // Live GPS Coordinate Fetcher (High Accuracy + Network Location Fallback)
     // detectionId — optional tag so every GPS request in logcat is traceable to a specific detection
-    const getLiveCoordinates = (detectionId?: string): Promise<{ latitude: number; longitude: number; accuracy: number; capturedAt: string; timestamp: number } | null> => {
+    const getLiveCoordinates = (detectionId?: string): Promise<{ latitude: number; longitude: number; accuracy: number; capturedAt: string; timestamp?: number } | null> => {
         const tag = detectionId ? `[GPS detectionId=${detectionId}]` : '[GPS]';
         return new Promise((resolve) => {
+
             const requestStartTime = Date.now();
             console.log(`${tag} Requesting fresh location (requestStartTime=${requestStartTime})...`);
             
@@ -169,66 +173,53 @@ export default function SurveyScreen() {
                     const ageMs = Date.now() - positionTimestamp;
                     const resolveLatency = Date.now() - requestStartTime;
                     
-                    console.log(`${tag} Received: lat=${latitude}, lng=${longitude}, accuracy=${accuracy || 10}m, timestamp=${positionTimestamp}, ageMs=${ageMs}, resolveLatency=${resolveLatency}ms`);
+                    console.log(`${tag} Received: lat=${latitude}, lng=${longitude}, accuracy=${accuracy || 10}m, ageMs=${ageMs}`);
                     
                     if (latitude && longitude) {
-                        // Check if location is too old
-                        if (ageMs > MAX_LOCATION_AGE_MS) {
-                            console.warn(`${tag} Location is stale (${ageMs}ms > ${MAX_LOCATION_AGE_MS}ms), requesting fresh fix...`);
-                            // Fall through to network fallback which will have different settings
-                        } else {
-                            const reading = {
-                                latitude,
-                                longitude,
-                                accuracy: accuracy || 10,
-                                capturedAt: new Date(positionTimestamp).toISOString(),
-                                timestamp: positionTimestamp,
-                            };
-                            lastPosRef.current = reading;
-                            console.log(`${tag} ✓ Fresh HIGH-ACCURACY location accepted: lat=${latitude.toFixed(6)}, lng=${longitude.toFixed(6)}, accuracy=${reading.accuracy}m, age=${ageMs}ms, resolveLatency=${resolveLatency}ms`);
-                            resolve(reading);
-                            return;
-                        }
+                        const reading = {
+                            latitude,
+                            longitude,
+                            accuracy: accuracy || 10,
+                            capturedAt: new Date(positionTimestamp).toISOString(),
+                            timestamp: positionTimestamp,
+                        };
+                        lastPosRef.current = reading;
+                        console.log(`${tag} ✓ Fresh HIGH-ACCURACY location accepted: lat=${latitude.toFixed(6)}, lng=${longitude.toFixed(6)}, accuracy=${reading.accuracy}m`);
+                        resolve(reading);
+                        return;
                     }
                     
-                    // Fallback to network location if high accuracy failed or location is stale
-                    console.warn(`${tag} High accuracy failed or stale, attempting network location fallback`);
+                    if (lastPosRef.current) {
+                        resolve(lastPosRef.current);
+                        return;
+                    }
+                    
+                    // Fallback to network location
                     Geolocation.getCurrentPosition(
-                        pos \u003d\u003e {
-                            const netLat \u003d pos.coords?.latitude;
-                            const netLng \u003d pos.coords?.longitude;
-                            const netAccuracy \u003d pos.coords?.accuracy || 20;
-                            const netTimestamp \u003d pos.timestamp || Date.now();
-                            const netAgeMs \u003d Date.now() - netTimestamp;
+                        pos => {
+                            const netLat = pos.coords?.latitude;
+                            const netLng = pos.coords?.longitude;
+                            const netAccuracy = pos.coords?.accuracy || 20;
+                            const netTimestamp = pos.timestamp || Date.now();
                             
-                            console.log(`${tag} Network fallback: lat\u003d${netLat}, lng\u003d${netLng}, accuracy\u003d${netAccuracy}m, ageMs\u003d${netAgeMs}`);
-                            
-                            if (netLat \u0026\u0026 netLng) {
-                                if (netAgeMs \u003e MAX_LOCATION_AGE_MS) {
-                                    console.error(`${tag} Network location also stale (${netAgeMs}ms \u003e ${MAX_LOCATION_AGE_MS}ms). Returning null.`);
-                                    resolve(null);
-                                } else {
-                                    const reading \u003d {
-                                        latitude: netLat,
-                                        longitude: netLng,
-                                        accuracy: netAccuracy,
-                                        capturedAt: new Date(netTimestamp).toISOString(),
-                                        timestamp: netTimestamp,
-                                    };
-                                    lastPosRef.current \u003d reading;
-                                    console.log(`${tag} ✓ Network location accepted: lat\u003d${reading.latitude.toFixed(6)}, lng\u003d${reading.longitude.toFixed(6)}, accuracy\u003d${reading.accuracy}m, age\u003d${netAgeMs}ms`);
-                                    resolve(reading);
-                                }
+                            if (netLat && netLng) {
+                                const reading = {
+                                    latitude: netLat,
+                                    longitude: netLng,
+                                    accuracy: netAccuracy,
+                                    capturedAt: new Date(netTimestamp).toISOString(),
+                                    timestamp: netTimestamp,
+                                };
+                                lastPosRef.current = reading;
+                                resolve(reading);
                             } else {
-                                console.error(`${tag} Network fallback failed. Returning null.`);
-                                resolve(null);
+                                resolve(lastPosRef.current || null);
                             }
                         },
-                        err2 \u003d\u003e {
-                            console.error(`${tag} All location attempts failed. Returning null.`);
-                            resolve(null);
+                        err2 => {
+                            resolve(lastPosRef.current || null);
                         },
-                        { enableHighAccuracy: false, timeout: 5000, maximumAge: 0 } // maximumAge: 0 forces fresh location
+                        { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
                     );
                 },
                 error => {
@@ -239,42 +230,32 @@ export default function SurveyScreen() {
                             const netLng = pos.coords?.longitude;
                             const netAccuracy = pos.coords?.accuracy || 20;
                             const netTimestamp = pos.timestamp || Date.now();
-                            const netAgeMs = Date.now() - netTimestamp;
-                            
-                            console.log(`${tag} Network fallback (error path): lat=${netLat}, lng=${netLng}, accuracy=${netAccuracy}m, ageMs=${netAgeMs}`);
                             
                             if (netLat && netLng) {
-                                if (netAgeMs > MAX_LOCATION_AGE_MS) {
-                                    console.error(`${tag} Network location stale (${netAgeMs}ms). Using cached or null.`);
-                                    resolve(lastPosRef.current ? { ...lastPosRef.current, timestamp: lastPosRef.current.timestamp || Date.now() } : null);
-                                } else {
-                                    const reading = {
-                                        latitude: netLat,
-                                        longitude: netLng,
-                                        accuracy: netAccuracy,
-                                        capturedAt: new Date(netTimestamp).toISOString(),
-                                        timestamp: netTimestamp,
-                                    };
-                                    lastPosRef.current = reading;
-                                    console.log(`${tag} ✓ Network location accepted (error path): lat=${reading.latitude.toFixed(6)}, lng=${reading.longitude.toFixed(6)}, accuracy=${reading.accuracy}m`);
-                                    resolve(reading);
-                                }
+                                const reading = {
+                                    latitude: netLat,
+                                    longitude: netLng,
+                                    accuracy: netAccuracy,
+                                    capturedAt: new Date(netTimestamp).toISOString(),
+                                    timestamp: netTimestamp,
+                                };
+                                lastPosRef.current = reading;
+                                resolve(reading);
                             } else {
-                                console.error(`${tag} Network fallback failed (error path), using cached or null`);
-                                resolve(lastPosRef.current ? { ...lastPosRef.current, timestamp: lastPosRef.current.timestamp || Date.now() } : null);
+                                resolve(lastPosRef.current || null);
                             }
                         },
                         err2 => {
-                            console.error(`${tag} All location attempts failed:`, err2);
-                            resolve(lastPosRef.current ? { ...lastPosRef.current, timestamp: lastPosRef.current.timestamp || Date.now() } : null);
+                            resolve(lastPosRef.current || null);
                         },
-                        { enableHighAccuracy: false, timeout: 5000, maximumAge: 0 } // maximumAge: 0 forces fresh location
+                        { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
                     );
                 },
-                { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 } // maximumAge: 0 forces fresh location
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
             );
         });
     };
+
 
     // AI Model Detection State
     const [lastDetectionStatus, setLastDetectionStatus] = useState<{
@@ -384,7 +365,7 @@ export default function SurveyScreen() {
                     newPhoto.uri,
                     assignment.routeId || assignment.route?.id || 'route-1',
                     assignment.route?.wardId || assignment.route?.ward?.id || 'ward-1',
-                    surveySessionId || 'default-session',
+                    surveySessionId || '',
                     assignment.id,
                     newPhoto.latitude,
                     newPhoto.longitude,
@@ -400,7 +381,7 @@ export default function SurveyScreen() {
                             [newPhoto.uri],
                             assignment.routeId || 'route-1',
                             assignment.route?.wardId || 'ward-1',
-                            surveySessionId || 'default-session',
+                            surveySessionId || '',
                             assignment.id,
                             newPhoto.latitude,
                             newPhoto.longitude,
@@ -414,7 +395,7 @@ export default function SurveyScreen() {
                         [newPhoto.uri],
                         assignment.routeId || 'route-1',
                         assignment.route?.wardId || 'ward-1',
-                        surveySessionId || 'default-session',
+                        surveySessionId || '',
                         assignment.id,
                         newPhoto.latitude,
                         newPhoto.longitude,
@@ -656,18 +637,11 @@ export default function SurveyScreen() {
             }
         }
 
-        // Compulsory GPS active verification
-        const liveLoc = await getLiveCoordinates();
-        if (!liveLoc && !lastPosRef.current) {
-            Alert.alert(
-                '📍 Location / GPS Must Be ON',
-                'Device Location (GPS) must be turned ON to start a survey and tag issue photos. Please turn ON Location in your device settings and try again.'
-            );
-            return false;
-        }
-
+        // Warm up GPS in background without blocking survey start
+        getLiveCoordinates().catch(() => {});
         return true;
     };
+
 
     const handleStartSurvey = async () => {
         // Check permissions
@@ -798,7 +772,7 @@ export default function SurveyScreen() {
         );
     };
 
-    const handlePickYesterdayPhotosFromGallery = async () => {
+    const handlePickPhotosFromGallery = async () => {
         try {
             const result = await launchImageLibrary({
                 mediaType: 'photo',
@@ -875,7 +849,7 @@ export default function SurveyScreen() {
         try {
             const targetWardId = assignment.route?.wardId || assignment.route?.ward?.id || 'ward-1';
             const targetRouteId = assignment.routeId || assignment.route?.id || 'route-1';
-            const targetSessionId = surveySessionId || 'default-session';
+            const targetSessionId = surveySessionId || '';
 
             const results = await Promise.all(
                 reviewPhotos.map(photo => {
@@ -988,7 +962,11 @@ export default function SurveyScreen() {
                 assignment.routeId,
                 assignment.route?.wardId || '',
                 surveySessionId,
-                assignment.id
+                assignment.id,
+                lastPosRef.current?.latitude || 0,
+                lastPosRef.current?.longitude || 0,
+                lastPosRef.current?.accuracy,
+                lastPosRef.current?.capturedAt
             );
             setUploadedCount(prev => prev + framesToUpload.length);
             const len = await offlineQueue.getQueueLength();
@@ -1190,8 +1168,8 @@ export default function SurveyScreen() {
                             Review captured images with GPS coordinates. Delete improper photos before sending to Admin.
                         </Text>
                         <Button
-                            title="📷 Pick Yesterday's Photos from Gallery"
-                            onPress={handlePickYesterdayPhotosFromGallery}
+                            title="📁 Import Photos from Gallery"
+                            onPress={handlePickPhotosFromGallery}
                             variant="secondary"
                             style={{ marginTop: spacing.sm, height: 42 }}
                         />
@@ -1202,11 +1180,11 @@ export default function SurveyScreen() {
                             <Text style={{ fontSize: 48, marginBottom: spacing.sm }}>📸</Text>
                             <Text style={styles.emptyText}>No photos in queue.</Text>
                             <Text style={[styles.infoLabel, { textAlign: 'center', marginTop: spacing.xs, marginBottom: spacing.lg }]}>
-                                Select photos from your device gallery to upload yesterday's survey.
+                                You can capture photos during live survey or select photos from device gallery.
                             </Text>
                             <Button
-                                title="📷 Select Yesterday's Photos from Gallery"
-                                onPress={handlePickYesterdayPhotosFromGallery}
+                                title="📁 Select Photos from Gallery"
+                                onPress={handlePickPhotosFromGallery}
                                 variant="primary"
                             />
                         </View>

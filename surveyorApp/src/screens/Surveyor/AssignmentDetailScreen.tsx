@@ -43,13 +43,7 @@ export default function AssignmentDetailScreen() {
                         }
                     } catch (e) {}
                 }
-
-                // If Demo Road and no stored key yet, pre-populate 2 yesterday demo photos
-                if (assignment.id.includes('demo') || assignment.route?.name?.toLowerCase().includes('demo')) {
-                    setSavedPhotosCount(2);
-                } else {
-                    setSavedPhotosCount(0);
-                }
+                setSavedPhotosCount(0);
             });
         }, [assignment.id, assignment.route?.name])
     );
@@ -192,11 +186,6 @@ export default function AssignmentDetailScreen() {
 
             {/* Action Buttons */}
             <View style={[styles.actions, { paddingBottom: insets.bottom + spacing.lg, gap: spacing.sm }]}>
-                <Button
-                    title="📷 Pick Yesterday's Photos from Gallery"
-                    onPress={() => navigation.navigate('Survey', { assignment: { ...assignment, status: 'IN_PROGRESS' }, pickFromGallery: true })}
-                    variant="success"
-                />
                 {currentStatus === 'PENDING' ? (
                     <Button
                         title="Accept Assignment"
@@ -205,11 +194,18 @@ export default function AssignmentDetailScreen() {
                         variant="primary"
                     />
                 ) : currentStatus === 'IN_PROGRESS' ? (
-                    <Button
-                        title="Start Camera Survey"
-                        onPress={handleStartSurvey}
-                        variant="secondary"
-                    />
+                    <>
+                        <Button
+                            title="📹 Start Live Camera Survey"
+                            onPress={handleStartSurvey}
+                            variant="primary"
+                        />
+                        <Button
+                            title="📁 Import Photos from Gallery (Optional)"
+                            onPress={() => navigation.navigate('Survey', { assignment: { ...assignment, status: 'IN_PROGRESS' }, pickFromGallery: true })}
+                            variant="secondary"
+                        />
+                    </>
                 ) : (
                     <View style={styles.completedBanner}>
                         <Text style={styles.completedText}>✓ Survey Completed</Text>

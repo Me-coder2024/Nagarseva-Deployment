@@ -96,108 +96,19 @@ class ApiService {
     async getAssignments(surveyorId: string): Promise<AssignmentsResponse> {
         try {
             const response = await this.post<AssignmentsResponse>('/surveyor/assignments', { surveyorId });
-            if (response && response.success && Array.isArray(response.assignments) && response.assignments.length > 0) {
+            if (response && response.success && Array.isArray(response.assignments)) {
                 return response;
             }
         } catch (e) {
-            console.warn('Network or server error fetching assignments, using local fallback:', e);
+            console.warn('Network or server error fetching assignments:', e);
         }
 
-        // Return fallback assignments including Demo Road & Waghodia Road so dashboard is always populated
         return {
             success: true,
-            assignments: [
-                {
-                    id: 'assignment-demo-road-1',
-                    routeId: 'route-demo-road-1',
-                    surveyorId,
-                    assignedAt: new Date().toISOString(),
-                    status: 'PENDING',
-                    route: {
-                        id: 'route-demo-road-1',
-                        name: 'Demo Road Patrol Corridor',
-                        wardId: 'ward-demo-1',
-                        startLat: 22.2873,
-                        startLon: 73.3616,
-                        endLat: 22.2950,
-                        endLon: 73.3700,
-                        distance: 3.2,
-                        ward: {
-                            id: 'ward-demo-1',
-                            name: 'Ward 5 - Waghodia Road',
-                            city: 'Vadodara',
-                        },
-                    },
-                },
-                {
-                    id: 'assignment-waghodia-2',
-                    routeId: 'route-waghodia-2',
-                    surveyorId,
-                    assignedAt: new Date().toISOString(),
-                    status: 'IN_PROGRESS',
-                    route: {
-                        id: 'route-waghodia-2',
-                        name: 'Waghodia Road Patrol Route',
-                        wardId: 'ward-waghodia-5',
-                        startLat: 22.2965,
-                        startLon: 73.2185,
-                        endLat: 22.2852,
-                        endLon: 73.2450,
-                        distance: 4.5,
-                        ward: {
-                            id: 'ward-waghodia-5',
-                            name: 'Ward 5 - Waghodia Road',
-                            city: 'Vadodara',
-                        },
-                    },
-                },
-                {
-                    id: 'assignment-sayajigunj-3',
-                    routeId: 'route-sayajigunj-3',
-                    surveyorId,
-                    assignedAt: new Date().toISOString(),
-                    status: 'PENDING',
-                    route: {
-                        id: 'route-sayajigunj-3',
-                        name: 'Sayajigunj Patrol Corridor',
-                        wardId: 'ward-1',
-                        startLat: 22.3085,
-                        startLon: 73.1732,
-                        endLat: 22.3150,
-                        endLon: 73.1820,
-                        distance: 4.2,
-                        ward: {
-                            id: 'ward-1',
-                            name: 'Ward 1 - Sayajigunj',
-                            city: 'Vadodara',
-                        },
-                    },
-                },
-                {
-                    id: 'assignment-alkapuri-4',
-                    routeId: 'route-alkapuri-4',
-                    surveyorId,
-                    assignedAt: new Date().toISOString(),
-                    status: 'COMPLETED',
-                    route: {
-                        id: 'route-alkapuri-4',
-                        name: 'Alkapuri Main Avenue',
-                        wardId: 'ward-2',
-                        startLat: 22.3120,
-                        startLon: 73.1680,
-                        endLat: 22.3200,
-                        endLon: 73.1750,
-                        distance: 3.8,
-                        ward: {
-                            id: 'ward-2',
-                            name: 'Ward 2 - Alkapuri',
-                            city: 'Vadodara',
-                        },
-                    },
-                },
-            ],
+            assignments: [],
         };
     }
+
 
     async acceptAssignment(routeAssignmentId: string): Promise<GenericResponse> {
         return this.put<GenericResponse>(`/surveyor/acceptAssignment/${routeAssignmentId}`);
@@ -358,10 +269,12 @@ class ApiService {
         // 1. Try Multipart upload first across available URLs
         const formData = new FormData();
         formData.append('detectionId', resolvedDetectionId);
-        formData.append('routeId', routeId);
-        formData.append('wardId', wardId);
-        formData.append('surverySessionId', surverySessionId);
-        formData.append('routeAssignmentId', routeAssignmentId);
+        if (routeId) formData.append('routeId', routeId);
+        if (wardId) formData.append('wardId', wardId);
+        if (surverySessionId && !surverySessionId.startsWith('session-') && !surverySessionId.startsWith('default-')) {
+            formData.append('surverySessionId', surverySessionId);
+        }
+        if (routeAssignmentId) formData.append('routeAssignmentId', routeAssignmentId);
         formData.append('latitude', latitude.toString());
         formData.append('longitude', longitude.toString());
         formData.append('confidence', confidence.toString());
@@ -370,6 +283,9 @@ class ApiService {
         }
         if (capturedAt) {
             formData.append('capturedAt', capturedAt);
+        }
+        if (photoData) {
+            formData.append('photoData', photoData);
         }
 
         const cleanUri = photoUri.startsWith('file://')
@@ -405,7 +321,7 @@ class ApiService {
                 if (response.status === 401) {
                     return { success: false, message: 'Session expired. Please log out and log in again.', httpStatus: response.status };
                 }
-                if (response.status === 400 && result?.message) {
+                if (result?.message) {
                     return { success: false, message: result.message, httpStatus: response.status };
                 }
             } catch (err) {
@@ -417,12 +333,13 @@ class ApiService {
         const jsonPayload = JSON.stringify({
             routeId,
             wardId,
-            surverySessionId,
+            surverySessionId: (surverySessionId && !surverySessionId.startsWith('session-') && !surverySessionId.startsWith('default-')) ? surverySessionId : undefined,
             routeAssignmentId,
             latitude,
             longitude,
             confidence,
             photoData: photoData || (photoUri.startsWith('data:') ? photoUri : undefined),
+            photoUri: photoUri.startsWith('http') ? photoUri : undefined,
         });
 
         for (const url of urlsToTry) {
@@ -444,7 +361,7 @@ class ApiService {
                 if (jsonRes.status === 401) {
                     return { success: false, message: 'Session expired. Please log out and log in again.', httpStatus: jsonRes.status };
                 }
-                if (jsonRes.status === 400 && jsonResult?.message) {
+                if (jsonResult?.message) {
                     return { success: false, message: jsonResult.message, httpStatus: jsonRes.status };
                 }
             } catch (e) {
@@ -454,7 +371,7 @@ class ApiService {
 
         return {
             success: false,
-            message: 'Failed to connect to backend server. Please verify backend is running on port 3000.',
+            message: 'Failed to connect to backend server. Please check your internet connection.',
             httpStatus: undefined
         };
     }

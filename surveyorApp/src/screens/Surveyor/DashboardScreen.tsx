@@ -36,13 +36,60 @@ export default function DashboardScreen() {
     const [activeTab, setActiveTab] = useState<FilterTab>('all');
 
     const [offlineCount, setOfflineCount] = useState<number>(0);
+    const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
     const fadeAnim = useRef(new Animated.Value(0)).current;
+
+    const performSync = useCallback(async () => {
+        const count = await offlineQueue.getTotalPendingPhotosCount();
+        setOfflineCount(count);
+        if (count > 0 && !offlineQueue.isQueuePaused()) {
+            setIsSyncing(true);
+            try {
+                await offlineQueue.syncQueue(async (item) => {
+                    try {
+                        await api.uploadFrames(
+                            item.frames,
+                            item.routeId,
+                            item.wardId,
+                            item.surveySessionId,
+                            item.assignmentId,
+                            item.latitude,
+                            item.longitude
+                        );
+                        return { success: true };
+                    } catch (e: any) {
+                        return { success: false, message: e?.message };
+                    }
+                });
+            } finally {
+                setIsSyncing(false);
+                const remaining = await offlineQueue.getTotalPendingPhotosCount();
+                setOfflineCount(remaining);
+            }
+        }
+    }, []);
+
+    // Subscribe to queue changes and keep syncing in background
+    useEffect(() => {
+        const unsubscribe = offlineQueue.subscribe((count) => {
+            setOfflineCount(count);
+        });
+
+        performSync();
+        const syncInterval = setInterval(performSync, 4000);
+
+        return () => {
+            unsubscribe();
+            clearInterval(syncInterval);
+        };
+    }, [performSync]);
 
     useFocusEffect(
         useCallback(() => {
             loadAssignments();
-        }, [user?.id])
+            performSync();
+        }, [user?.id, performSync])
     );
 
     useEffect(() => {
@@ -58,21 +105,6 @@ export default function DashboardScreen() {
     async function loadAssignments() {
         try {
             setError(null);
-
-            // Auto-sync any unsent offline survey frames from yesterday
-            offlineQueue.getQueueLength().then(len => {
-                setOfflineCount(len);
-                if (len > 0) {
-                    offlineQueue.syncQueue(async (item) => {
-                        try {
-                            await api.uploadFrames(item.frames, item.routeId, item.wardId, item.surveySessionId, item.assignmentId, item.latitude, item.longitude);
-                            return { success: true };
-                        } catch {
-                            return { success: false };
-                        }
-                    }).then(res => setOfflineCount(res.remaining));
-                }
-            });
 
             if (!user?.id) {
                 setError('Not authenticated. Please log in again.');
@@ -224,6 +256,39 @@ export default function DashboardScreen() {
                     <Text style={styles.statLabel}>Completed</Text>
                 </View>
             </View>
+
+            {/* Background Cloud Sync Status Banner */}
+            {offlineCount > 0 ? (
+                <View style={styles.syncBanner}>
+                    <View style={styles.syncLeft}>
+                        {isSyncing ? (
+                            <ActivityIndicator size="small" color="#B45309" style={{ marginRight: spacing.sm }} />
+                        ) : (
+                            <Text style={styles.syncIcon}>⏳</Text>
+                        )}
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.syncTitle}>
+                                {isSyncing ? 'Syncing Photos to Server...' : 'Photos Pending Upload'}
+                            </Text>
+                            <Text style={styles.syncSubtitle}>
+                                {offlineCount} photo{offlineCount === 1 ? '' : 's'} uploading in background
+                            </Text>
+                        </View>
+                    </View>
+                    <TouchableOpacity
+                        style={styles.syncButton}
+                        onPress={() => performSync()}
+                        disabled={isSyncing}
+                    >
+                        <Text style={styles.syncButtonText}>{isSyncing ? 'Syncing...' : 'Sync Now'}</Text>
+                    </TouchableOpacity>
+                </View>
+            ) : (
+                <View style={styles.syncedBanner}>
+                    <Text style={styles.syncedIcon}>☁️</Text>
+                    <Text style={styles.syncedText}>Cloud Sync Active • All photos & survey data uploaded</Text>
+                </View>
+            )}
 
             <View style={styles.tabsContainer}>
                 {(['all', 'pending', 'active', 'completed'] as FilterTab[]).map(tab => (
@@ -532,5 +597,72 @@ const styles = StyleSheet.create({
         ...typography.caption,
         color: '#fff',
         textAlign: 'center',
+    },
+    syncBanner: {
+        backgroundColor: '#FEF3C7',
+        borderWidth: 1,
+        borderColor: '#F59E0B',
+        borderRadius: borderRadius.lg,
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.sm,
+        marginHorizontal: spacing.lg,
+        marginTop: spacing.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        ...shadows.sm,
+    },
+    syncLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        marginRight: spacing.sm,
+    },
+    syncIcon: {
+        fontSize: 20,
+        marginRight: spacing.sm,
+    },
+    syncTitle: {
+        ...typography.caption,
+        fontWeight: '700',
+        color: '#92400E',
+    },
+    syncSubtitle: {
+        ...typography.small,
+        color: '#B45309',
+        marginTop: 1,
+    },
+    syncButton: {
+        backgroundColor: '#F59E0B',
+        paddingHorizontal: spacing.md,
+        paddingVertical: 6,
+        borderRadius: borderRadius.md,
+    },
+    syncButtonText: {
+        ...typography.small,
+        color: '#FFFFFF',
+        fontWeight: '700',
+    },
+    syncedBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#ECFDF5',
+        borderWidth: 1,
+        borderColor: '#A7F3D0',
+        borderRadius: borderRadius.md,
+        paddingVertical: 6,
+        paddingHorizontal: spacing.md,
+        marginHorizontal: spacing.lg,
+        marginTop: spacing.sm,
+    },
+    syncedIcon: {
+        fontSize: 14,
+        marginRight: spacing.xs,
+    },
+    syncedText: {
+        ...typography.small,
+        color: '#065F46',
+        fontWeight: '600',
     },
 });

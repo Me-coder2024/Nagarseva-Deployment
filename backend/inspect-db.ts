@@ -3,20 +3,18 @@ dotenv.config({ path: './backend/.env' });
 import { prisma } from './src/lib/prisma.js';
 
 async function main() {
-  const wards = await prisma.ward.findMany();
-  const routes = await prisma.route.findMany();
-  const issues = await prisma.issue.findMany({ take: 10, include: { ward: true, route: true } });
-  
-  console.log('=== WARDS IN DB ===');
-  console.log(JSON.stringify(wards, null, 2));
-  
-  console.log('\n=== ROUTES IN DB ===');
-  console.log(JSON.stringify(routes, null, 2));
+  const users = await prisma.user.findMany({ select: { id: true, email: true, name: true, role: true } });
+  console.log('=== USERS IN DB ===');
+  console.log(JSON.stringify(users, null, 2));
 
-  console.log('\n=== RECENT ISSUES IN DB ===');
-  issues.forEach(i => {
-    console.log(`ID: ${i.id} | lat: ${i.latitude} | lon: ${i.longitude} | Ward: ${i.ward?.name} (id: ${i.wardId}) | Route: ${i.route?.name} (id: ${i.routeId})`);
+  const assignments = await prisma.routeAssignment.findMany({
+    include: {
+      surveyor: { select: { id: true, email: true, name: true } },
+      route: { include: { ward: true } }
+    }
   });
+  console.log('\n=== ROUTE ASSIGNMENTS IN DB ===');
+  console.log(JSON.stringify(assignments, null, 2));
 
   await prisma.$disconnect();
 }

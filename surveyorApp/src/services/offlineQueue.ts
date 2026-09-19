@@ -41,6 +41,7 @@ class OfflineQueueManager {
     private isProcessingQueue: boolean = false;
     private isPaused: boolean = false;
     private pauseReason?: string;
+    private listeners: ((pendingCount: number) => void)[] = [];
 
     private log(message: string, data?: any) {
         const timestamp = new Date().toISOString();
@@ -273,6 +274,7 @@ class OfflineQueueManager {
     private async saveQueue(queue: OfflineQueueItem[]): Promise<void> {
         try {
             await AsyncStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(queue));
+            this.notifyListeners();
         } catch (error) {
             this.log('Failed to save queue', error);
         }
@@ -281,6 +283,30 @@ class OfflineQueueManager {
     async getQueueLength(): Promise<number> {
         const queue = await this.getQueue();
         return queue.length;
+    }
+
+    async getTotalPendingPhotosCount(): Promise<number> {
+        const queue = await this.getQueue();
+        return queue.reduce((acc, item) => acc + (item.frames?.length || 1), 0);
+    }
+
+    subscribe(callback: (pendingCount: number) => void): () => void {
+        this.listeners.push(callback);
+        this.getTotalPendingPhotosCount().then(callback);
+        return () => {
+            this.listeners = this.listeners.filter(l => l !== callback);
+        };
+    }
+
+    private async notifyListeners() {
+        try {
+            const count = await this.getTotalPendingPhotosCount();
+            this.listeners.forEach(cb => {
+                try {
+                    cb(count);
+                } catch (e) {}
+            });
+        } catch (e) {}
     }
 
     async getFailedItems(): Promise<OfflineQueueItem[]> {
@@ -312,6 +338,7 @@ class OfflineQueueManager {
     async clearQueue(): Promise<void> {
         try {
             await AsyncStorage.removeItem(QUEUE_STORAGE_KEY);
+            this.notifyListeners();
             this.log('Queue cleared');
         } catch (error) {
             this.log('Failed to clear queue', error);

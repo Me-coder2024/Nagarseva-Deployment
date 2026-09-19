@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { View, Text, StyleSheet, Pressable, StatusBar, Animated } from 'react-native';
+import { View, Text, StyleSheet, Pressable, StatusBar, Animated, ScrollView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
@@ -55,35 +55,43 @@ export default function RoleSelectionScreen() {
         <View style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
             
-            <View style={styles.heroSection}>
-                <View style={styles.emblemContainer}>
-                    <Text style={styles.emblemIcon}>🏛️</Text>
+            <ScrollView
+                style={styles.scrollView}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+                keyboardShouldPersistTaps="handled"
+            >
+                <View style={styles.heroSection}>
+                    <View style={styles.emblemContainer}>
+                        <Text style={styles.emblemIcon}>🏛️</Text>
+                    </View>
+                    <Text style={styles.governmentText}>Government of Gujarat</Text>
+                    <Text style={styles.title}>NagarSeva</Text>
+                    <Text style={styles.subtitle}>Civic Operations Portal</Text>
                 </View>
-                <Text style={styles.governmentText}>Government of Gujarat</Text>
-                <Text style={styles.title}>NagarSeva</Text>
-                <Text style={styles.subtitle}>Civic Operations Portal</Text>
-            </View>
 
-            <View style={styles.content}>
-                <View style={styles.headerTextContainer}>
-                    <Text style={styles.welcomeText}>Welcome back</Text>
-                    <Text style={styles.instruction}>Select your operational role to securely log in to the portal.</Text>
+                <View style={styles.content}>
+                    <View style={styles.headerTextContainer}>
+                        <Text style={styles.welcomeText}>Welcome back</Text>
+                        <Text style={styles.instruction}>Select your operational role to securely log in to the portal.</Text>
+                    </View>
+                    
+                    <RoleCard 
+                        title="Surveyor" 
+                        description="Conduct field surveys and report active civic issues." 
+                        icon="🔍" 
+                        onPress={() => navigation.navigate('Login', { role: 'SURVEYOR' })}
+                    />
+
+                    <RoleCard 
+                        title="Engineer" 
+                        description="View assignments and update issue resolution status." 
+                        icon="🛠️" 
+                        onPress={() => navigation.navigate('Login', { role: 'ENGINEER' })}
+                    />
                 </View>
-                
-                <RoleCard 
-                    title="Surveyor" 
-                    description="Conduct field surveys and report active civic issues." 
-                    icon="🔍" 
-                    onPress={() => navigation.navigate('Login', { role: 'SURVEYOR' })}
-                />
-
-                <RoleCard 
-                    title="Engineer" 
-                    description="View assignments and update issue resolution status." 
-                    icon="🛠️" 
-                    onPress={() => navigation.navigate('Login', { role: 'ENGINEER' })}
-                />
-            </View>
+            </ScrollView>
         </View>
     );
 }
@@ -93,28 +101,35 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: colors.background,
     },
+    scrollView: {
+        flex: 1,
+    },
+    scrollContent: {
+        flexGrow: 1,
+        paddingBottom: spacing.xxxl,
+    },
     heroSection: {
         alignItems: 'center',
-        paddingVertical: spacing.xxxl,
+        paddingVertical: spacing.xl,
         paddingHorizontal: spacing.lg,
         backgroundColor: colors.primary,
-        borderBottomLeftRadius: 50,
-        borderBottomRightRadius: 50,
-        paddingTop: spacing.xxxl + 40, 
+        borderBottomLeftRadius: 36,
+        borderBottomRightRadius: 36,
+        paddingTop: spacing.xxl + 20, 
         ...shadows.xl,
         zIndex: 10,
         overflow: 'hidden',
     },
     emblemContainer: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
+        width: 76,
+        height: 76,
+        borderRadius: 38,
         backgroundColor: colors.surface,
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: spacing.lg,
+        marginBottom: spacing.md,
         ...shadows.lg,
-        borderWidth: 6,
+        borderWidth: 4,
         borderColor: colors.primaryLight + '30',
     },
     emblemIcon: {

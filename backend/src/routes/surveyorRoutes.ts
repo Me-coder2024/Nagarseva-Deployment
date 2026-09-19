@@ -151,23 +151,15 @@ async function processImage(
       });
       finalImageUrl = uploadResult.secure_url;
     } catch (cErr) {
-      console.error("[processImage] Cloudinary upload failed:", cErr);
-      try { finalImageUrl = localUploadUrl(imagePath); } catch {
-        throw new Error("Image upload failed: Cloudinary is unreachable and local storage is disabled in production.");
-      }
+      console.warn("[processImage] Cloudinary upload failed, falling back to local server path:", cErr);
+      finalImageUrl = localUploadUrl(imagePath);
     }
   } else {
-    try { finalImageUrl = localUploadUrl(imagePath); } catch {
-      throw new Error("Image upload failed: Cloudinary is not configured and local storage is disabled in production.");
-    }
+    finalImageUrl = localUploadUrl(imagePath);
   }
 
   if (!finalImageUrl) {
-    // Image file exists on disk but URL was not set - use local server path as final fallback
-    try { finalImageUrl = localUploadUrl(imagePath); } catch {
-      throw new Error("Image upload failed: no storage backend available in production.");
-    }
-    console.warn(`[processImage] Using local server path as image URL: ${finalImageUrl}`);
+    finalImageUrl = localUploadUrl(imagePath);
   }
 
   console.log(`[processImage] PRE-CREATE: lat=${latitude ?? 'NULL'}, lng=${longitude ?? 'NULL'}, wardId=${wardId ?? 'NULL'}, routeId=${routeId ?? 'NULL'}, imageUrl=${finalImageUrl}`);
@@ -519,11 +511,21 @@ surveyorRouter.post(
     try {
       let targetWardId: string | null = null;
       let targetRouteId: string | null = null;
-      let targetSessionId = surverySessionId;
+      let targetSessionId: string | null = surverySessionId || null;
 
-      // surveySessionId is optional for direct photo detections; allow null
-      if (!targetSessionId) {
-        console.warn(`[BACKEND] No surverySessionId provided - issue will be created without session link.`);
+      // Validate that session exists in database to prevent foreign key violations
+      if (targetSessionId) {
+        try {
+          const existingSession = await prisma.surveySession.findUnique({
+            where: { id: targetSessionId },
+          });
+          if (!existingSession) {
+            console.warn(`[BACKEND] Session ${targetSessionId} not found in database. Proceeding without session link.`);
+            targetSessionId = null;
+          }
+        } catch (e) {
+          targetSessionId = null;
+        }
       }
 
       // Start with no imageUrl - we'll determine it below
@@ -542,24 +544,10 @@ surveyorRouter.post(
             console.log("✅ Image uploaded to Cloudinary:", imageUrl);
           } catch (cloudErr) {
             console.warn("Cloudinary upload failed, using local server path:", cloudErr);
-            try {
-              imageUrl = localUploadUrl(imagePath);
-            } catch (storageErr) {
-              return res.status(500).json({
-                success: false,
-                message: "Image upload failed: Cloudinary is unreachable and local storage is disabled in production.",
-              });
-            }
+            imageUrl = localUploadUrl(imagePath);
           }
         } else {
-          try {
-            imageUrl = localUploadUrl(imagePath);
-          } catch (storageErr) {
-            return res.status(500).json({
-              success: false,
-              message: "Image upload failed: Cloudinary is not configured and local storage is disabled in production.",
-            });
-          }
+          imageUrl = localUploadUrl(imagePath);
         }
       } else if (req.body.photoData && typeof req.body.photoData === "string" && req.body.photoData.length > 50) {
         try {
@@ -576,24 +564,10 @@ surveyorRouter.post(
               });
               imageUrl = uploadResult.secure_url;
             } catch (cloudErr) {
-              try {
-                imageUrl = localUploadUrl(filename);
-              } catch (storageErr) {
-                return res.status(500).json({
-                  success: false,
-                  message: "Image upload failed: Cloudinary is unreachable and local storage is disabled in production.",
-                });
-              }
+              imageUrl = localUploadUrl(filename);
             }
           } else {
-            try {
-              imageUrl = localUploadUrl(filename);
-            } catch (storageErr) {
-              return res.status(500).json({
-                success: false,
-                message: "Image upload failed: Cloudinary is not configured and local storage is disabled in production.",
-              });
-            }
+            imageUrl = localUploadUrl(filename);
           }
           console.log("✅ Saved real-time photo to file and URL:", imageUrl);
         } catch (b64Err) {

@@ -22,7 +22,7 @@ app.use(cors({ origin(origin, callback) {
 }, methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["Content-Type", "Authorization"] }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
-if (!production) app.use("/uploads", express.static("uploads"));
+app.use("/uploads", express.static("uploads"));
 app.get("/", (_req, res) => res.json({ service: "NagarSeva Backend", status: "ok" }));
 app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
 app.get("/api/ready", async (_req, res) => {
