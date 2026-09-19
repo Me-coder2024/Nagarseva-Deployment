@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, typography, spacing } from '../theme';
+import { colors, typography, spacing, borderRadius } from '../theme';
 
 interface HeaderProps {
     title: string;
@@ -19,10 +19,15 @@ export default function Header({
     const insets = useSafeAreaInsets();
 
     return (
-        <View style={[styles.container, { paddingTop: insets.top + spacing.lg }]}>
+        <View style={[styles.container, { paddingTop: Math.max(insets.top + spacing.xs, spacing.md) }]}>
             <View style={styles.row}>
                 {onBack && (
-                    <TouchableOpacity style={styles.backButton} onPress={onBack}>
+                    <TouchableOpacity
+                        style={styles.backButton}
+                        onPress={onBack}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
                         <Text style={styles.backIcon}>←</Text>
                     </TouchableOpacity>
                 )}
@@ -30,7 +35,11 @@ export default function Header({
                     <Text style={styles.title} numberOfLines={1}>
                         {title}
                     </Text>
-                    {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
+                    {subtitle ? (
+                        <Text style={styles.subtitle} numberOfLines={1}>
+                            {subtitle}
+                        </Text>
+                    ) : null}
                 </View>
                 {rightAction && <View style={styles.rightAction}>{rightAction}</View>}
             </View>
@@ -41,35 +50,48 @@ export default function Header({
 const styles = StyleSheet.create({
     container: {
         backgroundColor: colors.primary,
-        paddingBottom: spacing.xl,
-        paddingHorizontal: spacing.lg,
+        paddingBottom: spacing.md,
+        paddingHorizontal: spacing.md,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(255, 255, 255, 0.08)',
     },
     row: {
         flexDirection: 'row',
         alignItems: 'center',
+        minHeight: 44,
     },
     backButton: {
-        marginRight: spacing.md,
-        padding: spacing.xs,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: 'rgba(255, 255, 255, 0.18)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: spacing.sm,
     },
     backIcon: {
         color: colors.textInverse,
-        fontSize: 24,
-        fontWeight: '600',
+        fontSize: 20,
+        fontWeight: '700',
+        marginTop: -2,
     },
     titleContainer: {
         flex: 1,
+        justifyContent: 'center',
     },
     title: {
-        ...typography.heading2,
+        fontSize: 18,
+        fontWeight: '700',
         color: colors.textInverse,
+        letterSpacing: -0.3,
     },
     subtitle: {
-        ...typography.caption,
-        color: 'rgba(255,255,255,0.8)',
-        marginTop: 2,
+        fontSize: 12,
+        fontWeight: '500',
+        color: 'rgba(255, 255, 255, 0.8)',
+        marginTop: 1,
     },
     rightAction: {
-        marginLeft: spacing.md,
+        marginLeft: spacing.sm,
     },
 });

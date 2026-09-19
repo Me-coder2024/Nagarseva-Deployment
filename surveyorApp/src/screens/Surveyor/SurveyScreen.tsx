@@ -908,142 +908,6 @@ export default function SurveyScreen() {
         }
     };
 
-    // Demo Mode: Pick video and extract frames
-    const handleDemoMode = async () => {
-        try {
-            // Launch gallery to pick video
-            const result = await launchImageLibrary({
-                mediaType: 'video',
-                selectionLimit: 1,
-            });
-
-            if (result.didCancel || !result.assets || result.assets.length === 0) {
-                return;
-            }
-
-            const videoUri = result.assets[0].uri;
-            if (!videoUri) {
-                Alert.alert('Error', 'Could not get video path');
-                return;
-            }
-
-            // Start survey session first
-            setExtracting(true);
-            const startedAt = new Date().toISOString();
-            const response = await api.startSurvey(assignment.id, startedAt);
-
-            if (!response.success || !response.surverySessionId) {
-                Alert.alert('Error', response.message || 'Failed to start survey session.');
-                setExtracting(false);
-                return;
-            }
-
-            setSurveySessionId(response.surverySessionId);
-            setSurveyStartTime(new Date());
-
-            // Extract frames from video using native module
-            // Remove 'file://' prefix if present for Android
-            const cleanPath = videoUri.replace('file://', '');
-            const extractedFrames = await FrameExtractor.extractFrames(
-                cleanPath,
-                2000, // interval in ms (every 2 seconds)
-                30    // max frames
-            );
-
-            if (extractedFrames && extractedFrames.length > 0) {
-                setFrames(extractedFrames);
-                setDemoMode(true);
-            } else {
-                Alert.alert('Error', 'No frames could be extracted from the video');
-            }
-        } catch (error: any) {
-            console.error('Demo mode error:', error);
-            Alert.alert('Error', error.message || 'Failed to process video');
-        } finally {
-            setExtracting(false);
-        }
-    };
-
-    // Handle upload for demo mode
-    const handleDemoUpload = async () => {
-        setEnding(true);
-        try {
-            if (frames.length > 0 && surveySessionId) {
-                await uploadBatch(frames);
-            }
-
-            // End survey session
-            if (surveySessionId) {
-                const endedAt = new Date().toISOString();
-                await api.endSurvey(surveySessionId, endedAt);
-            }
-
-            // Navigate to summary
-            navigation.replace('SurveyComplete', {
-                frameCount: frames.length,
-                assignmentId: assignment.id,
-                routeName: assignment.route?.name || 'Survey Route',
-                duration: elapsedTime,
-                issuesDetected: 0,
-            });
-        } catch (error) {
-            console.error('Demo upload failed:', error);
-            Alert.alert('Error', 'Failed to upload frames.');
-        } finally {
-            setEnding(false);
-        }
-    };
-
-    // Demo Mode View (Frame Preview)
-    if (demoMode) {
-        return (
-            <View style={styles.container}>
-                <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-                <Header
-                    title="Demo Mode"
-                    subtitle={`${frames.length} frames extracted`}
-                    onBack={() => setDemoMode(false)}
-                />
-
-                <View style={styles.content}>
-                    <Card>
-                        <Text style={styles.sectionTitle}>Extracted Frames</Text>
-                        <Text style={styles.infoLabel}>
-                            {frames.length} frames ready to upload
-                        </Text>
-                    </Card>
-
-                    {/* Frame Preview */}
-                    <FlatList
-                        data={frames}
-                        keyExtractor={(item, index) => `frame-${index}`}
-                        numColumns={3}
-                        contentContainerStyle={styles.frameGrid}
-                        renderItem={({ item, index }) => (
-                            <View style={styles.frameThumb}>
-                                <Image
-                                    source={{ uri: item }}
-                                    style={styles.frameImage}
-                                    resizeMode="cover"
-                                />
-                                <Text style={styles.frameIndex}>{index + 1}</Text>
-                            </View>
-                        )}
-                    />
-                </View>
-
-                <View style={styles.footer}>
-                    <Button
-                        title="Upload Frames"
-                        onPress={handleDemoUpload}
-                        loading={ending}
-                        variant="success"
-                    />
-                </View>
-            </View>
-        );
-    }
-
     // Photo Review & Delete Screen View (Before Upload to Admin)
     if (showReviewScreen) {
         return (
@@ -1051,36 +915,31 @@ export default function SurveyScreen() {
                 <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
                 <Header
                     title="Review Survey Photos"
-                    subtitle={`Inspect & delete improper photos (${reviewPhotos.length} ready)`}
+                    subtitle={`${reviewPhotos.length} photo${reviewPhotos.length === 1 ? '' : 's'} ready for upload`}
                     onBack={() => setShowReviewScreen(false)}
                 />
 
-                <View style={styles.content}>
-                    <Card style={{ marginBottom: spacing.md }}>
-                        <Text style={styles.sectionTitle}>📋 Survey Photos Queue</Text>
-                        <Text style={styles.infoLabel}>
-                            Review captured images with GPS coordinates. Delete improper photos before queueing for upload.
-                        </Text>
-                    </Card>
-
+                <View style={styles.screenBody}>
                     {reviewPhotos.length === 0 ? (
-                        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl }}>
-                            <Text style={{ fontSize: 48, marginBottom: spacing.sm }}>📸</Text>
-                            <Text style={styles.emptyText}>No photos captured yet.</Text>
-                            <Text style={[styles.infoLabel, { textAlign: 'center', marginTop: spacing.xs, marginBottom: spacing.lg }]}>
+                        <View style={styles.emptyContainer}>
+                            <Text style={{ fontSize: 44, marginBottom: spacing.sm }}>📸</Text>
+                            <Text style={styles.emptyTitle}>No Photos Captured</Text>
+                            <Text style={styles.emptySubtitle}>
                                 Return to live camera to capture road photos.
                             </Text>
                             <Button
                                 title="📸 Return to Camera"
                                 onPress={() => setShowReviewScreen(false)}
                                 variant="primary"
+                                style={{ marginTop: spacing.md }}
                             />
                         </View>
                     ) : (
                         <FlatList
                             data={reviewPhotos}
                             keyExtractor={item => item.id}
-                            contentContainerStyle={{ paddingBottom: spacing.xxl }}
+                            contentContainerStyle={[styles.reviewList, { paddingBottom: Math.max(insets.bottom + 100, 120) }]}
+                            showsVerticalScrollIndicator={false}
                             renderItem={({ item, index }) => (
                                 <View style={styles.reviewPhotoCard}>
                                     <Image
@@ -1089,14 +948,20 @@ export default function SurveyScreen() {
                                         resizeMode="cover"
                                     />
                                     <View style={styles.reviewPhotoInfo}>
-                                        <Text style={styles.reviewPhotoIndex}>Photo #{index + 1}</Text>
-                                        <Text style={styles.reviewPhotoGps}>📍 Lat: {item.latitude.toFixed(4)}, Lon: {item.longitude.toFixed(4)}</Text>
-                                        <Text style={styles.reviewPhotoTime}>🕒 Captured at {item.timestamp}</Text>
+                                        <View style={styles.reviewPhotoHeader}>
+                                            <Text style={styles.reviewPhotoIndex}>Photo #{index + 1}</Text>
+                                            <Text style={styles.reviewPhotoTime}>{item.timestamp}</Text>
+                                        </View>
+                                        <View style={styles.reviewGpsPill}>
+                                            <Text style={styles.reviewPhotoGps}>
+                                                📍 {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}
+                                            </Text>
+                                        </View>
                                         <Button
-                                            title="🗑️ Delete Improper Photo"
+                                            title="🗑️ Delete Photo"
                                             onPress={() => handleDeletePhoto(item.id)}
                                             variant="danger"
-                                            style={{ marginTop: spacing.sm, height: 38 }}
+                                            style={styles.deletePhotoBtn}
                                         />
                                     </View>
                                 </View>
@@ -1105,7 +970,8 @@ export default function SurveyScreen() {
                     )}
                 </View>
 
-                <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom + spacing.md, 24), gap: spacing.md, flexDirection: 'row' }]}>
+                {/* Sticky Review Footer */}
+                <View style={[styles.reviewFooter, { paddingBottom: Math.max(insets.bottom + spacing.sm, spacing.md) }]}>
                     <Button
                         title="📸 Add Photos"
                         onPress={() => setShowReviewScreen(false)}
@@ -1118,7 +984,7 @@ export default function SurveyScreen() {
                         loading={isUploadingApproved}
                         disabled={reviewPhotos.length === 0}
                         variant="success"
-                        style={{ flex: 1.5, backgroundColor: '#10B981' }}
+                        style={{ flex: 1.6 }}
                     />
                 </View>
             </View>
@@ -1193,10 +1059,10 @@ export default function SurveyScreen() {
                             <View style={[
                                 styles.debugGpsContainer,
                                 debugGps.accuracy < 15
-                                    ? { borderColor: '#10B981' } // strong — green
+                                    ? { borderColor: '#10B981' }
                                     : debugGps.accuracy < 40
-                                        ? { borderColor: '#F59E0B' } // fair — amber
-                                        : { borderColor: '#EF4444' }, // weak — red
+                                        ? { borderColor: '#F59E0B' }
+                                        : { borderColor: '#EF4444' },
                             ]}>
                                 <Text style={[
                                     styles.debugGpsLabel,
@@ -1206,10 +1072,9 @@ export default function SurveyScreen() {
                                             ? { color: '#F59E0B' }
                                             : { color: '#EF4444' },
                                 ]}>
-                                    GPS DEBUG  •  {gpsDetectionCount} detections this session
+                                    GPS DEBUG  •  {gpsDetectionCount} detections
                                 </Text>
-                                <Text style={styles.debugGpsValue}>Lat: {debugGps.lat.toFixed(6)}</Text>
-                                <Text style={styles.debugGpsValue}>Lng: {debugGps.lng.toFixed(6)}</Text>
+                                <Text style={styles.debugGpsValue}>Lat: {debugGps.lat.toFixed(6)} | Lng: {debugGps.lng.toFixed(6)}</Text>
                                 <Text style={[
                                     styles.debugGpsValue,
                                     debugGps.accuracy < 15
@@ -1218,9 +1083,8 @@ export default function SurveyScreen() {
                                             ? { color: '#F59E0B', fontWeight: '700' }
                                             : { color: '#EF4444', fontWeight: '700' },
                                 ]}>
-                                    Acc: ±{debugGps.accuracy.toFixed(1)}m  {debugGps.accuracy < 15 ? '●' : debugGps.accuracy < 40 ? '◐' : '○'}
+                                    Acc: ±{debugGps.accuracy.toFixed(1)}m
                                 </Text>
-                                <Text style={styles.debugGpsValue}>Age: {(debugGps.age / 1000).toFixed(1)}s</Text>
                             </View>
                         )}
 
@@ -1257,28 +1121,37 @@ export default function SurveyScreen() {
                         </View>
                     </View>
 
-                    {/* Bottom Controls */}
-                    <View style={[styles.cameraControls, { paddingBottom: Math.max(insets.bottom + 16, 28) }]}>
+                    {/* Active AI Detection Box */}
+                    {showDetectionBox && (
+                        <View style={styles.activeDetectionBox}>
+                            <View style={styles.detectionLabelBadge}>
+                                <Text style={styles.detectionLabelText}>POTHOLE DETECTED</Text>
+                            </View>
+                        </View>
+                    )}
+
+                    {/* Bottom Camera Controls */}
+                    <View style={[styles.cameraControls, { paddingBottom: Math.max(insets.bottom + spacing.sm, 24) }]}>
                         {cameraRunning && (
                             <View style={styles.controlRow}>
                                 <TouchableOpacity
                                     style={[
                                         styles.controlButton,
-                                        autoCaptureEnabled ? styles.autoCaptureOn : styles.autoCaptureOff
+                                        autoCaptureEnabled ? styles.autoBtnActive : styles.autoBtnInactive
                                     ]}
                                     onPress={() => setAutoCaptureEnabled(prev => !prev)}
                                 >
                                     <Text style={styles.controlButtonText}>
-                                        {autoCaptureEnabled ? "⚡ Auto: ON" : "⏸ Auto: OFF"}
+                                        {autoCaptureEnabled ? '🤖 Auto: ON' : '🤖 Auto: OFF'}
                                     </Text>
                                 </TouchableOpacity>
 
                                 <TouchableOpacity
-                                    style={[styles.controlButton, styles.manualCaptureBtn]}
+                                    style={[styles.controlButton, styles.captureBtn]}
                                     onPress={handleCapturePhoto}
                                     disabled={uploadingDetection}
                                 >
-                                    <Text style={styles.controlButtonText}>📸 Manual</Text>
+                                    <Text style={styles.controlButtonText}>📸 Capture</Text>
                                 </TouchableOpacity>
                             </View>
                         )}
@@ -1320,84 +1193,89 @@ export default function SurveyScreen() {
         <View style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
             <Header
-                title="Start Survey"
-                subtitle={assignment.route?.name}
+                title="Ready to Survey"
+                subtitle={assignment.route?.name || 'Survey Route'}
                 onBack={() => navigation.goBack()}
             />
 
             <ScrollView
-                style={styles.container}
-                contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom + 140, 160) }]}
+                style={styles.scrollArea}
+                contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom + 100, 120) }]}
                 showsVerticalScrollIndicator={false}
             >
                 {/* Route Info Card */}
-                <Card>
-                    <Text style={styles.sectionTitle}>Survey Details</Text>
-                    <View style={styles.infoRow}>
-                        <View style={styles.infoItem}>
-                            <Text style={styles.infoLabel}>Route</Text>
-                            <Text style={styles.infoValue}>{assignment.route?.name}</Text>
+                <View style={styles.cardContainer}>
+                    <Text style={styles.cardHeading}>Survey Details</Text>
+                    <View style={styles.infoGrid}>
+                        <View style={styles.infoRow}>
+                            <View style={styles.infoCol}>
+                                <Text style={styles.infoLabel}>ROUTE</Text>
+                                <Text style={styles.infoValue} numberOfLines={2}>{assignment.route?.name || 'N/A'}</Text>
+                            </View>
+                            <View style={styles.infoCol}>
+                                <Text style={styles.infoLabel}>WARD</Text>
+                                <Text style={styles.infoValue} numberOfLines={2}>{assignment.route?.ward?.name || 'N/A'}</Text>
+                            </View>
                         </View>
-                        <View style={styles.infoItem}>
-                            <Text style={styles.infoLabel}>Ward</Text>
-                            <Text style={styles.infoValue}>{assignment.route?.ward?.name}</Text>
+                        <View style={styles.divider} />
+                        <View style={styles.infoRow}>
+                            <View style={styles.infoCol}>
+                                <Text style={styles.infoLabel}>ESTIMATED DISTANCE</Text>
+                                <Text style={styles.infoValue}>{assignment.route?.distance ?? 0} km</Text>
+                            </View>
+                            <View style={styles.infoCol}>
+                                <Text style={styles.infoLabel}>DETECTION MODE</Text>
+                                <Text style={styles.infoValue}>Live AI Camera</Text>
+                            </View>
                         </View>
                     </View>
-                    <View style={styles.infoRow}>
-                        <View style={styles.infoItem}>
-                            <Text style={styles.infoLabel}>Distance</Text>
-                            <Text style={styles.infoValue}>{assignment.route?.distance} km</Text>
-                        </View>
-                    </View>
-                </Card>
+                </View>
 
                 {/* Checklist Card */}
-                <Card style={styles.checklistCard}>
-                    <Text style={styles.sectionTitle}>Pre-Survey Checklist</Text>
-                    <View style={styles.checkItem}>
-                        <Text style={styles.checkIcon}>📷</Text>
-                        <Text style={styles.checkText}>Camera permission required</Text>
+                <View style={styles.cardContainer}>
+                    <Text style={styles.cardHeading}>Pre-Survey Checklist</Text>
+                    <View style={styles.checkList}>
+                        <View style={styles.checkItem}>
+                            <Text style={styles.checkIcon}>📷</Text>
+                            <View style={styles.checkContent}>
+                                <Text style={styles.checkTitle}>Camera Access Granted</Text>
+                                <Text style={styles.checkSub}>Vision camera ready for continuous frame capture</Text>
+                            </View>
+                        </View>
+                        <View style={styles.checkItem}>
+                            <Text style={styles.checkIcon}>📍</Text>
+                            <View style={styles.checkContent}>
+                                <Text style={styles.checkTitle}>High-Accuracy GPS Enabled</Text>
+                                <Text style={styles.checkSub}>Geo-tags every detected pothole precisely</Text>
+                            </View>
+                        </View>
+                        <View style={styles.checkItem}>
+                            <Text style={styles.checkIcon}>🏍️</Text>
+                            <View style={styles.checkContent}>
+                                <Text style={styles.checkTitle}>Device Firmly Mounted</Text>
+                                <Text style={styles.checkSub}>Secure on handlebar with forward road view</Text>
+                            </View>
+                        </View>
                     </View>
-                    <View style={styles.checkItem}>
-                        <Text style={styles.checkIcon}>📍</Text>
-                        <Text style={styles.checkText}>Location access required</Text>
-                    </View>
-                    <View style={styles.checkItem}>
-                        <Text style={styles.checkIcon}>🏍️</Text>
-                        <Text style={styles.checkText}>Mount device securely on bike</Text>
-                    </View>
-                    <View style={styles.checkItem}>
-                        <Text style={styles.checkIcon}>🔋</Text>
-                        <Text style={styles.checkText}>Ensure sufficient battery</Text>
-                    </View>
-                </Card>
+                </View>
 
                 {/* Instructions */}
-                <Card style={styles.instructionsCard}>
-                    <Text style={styles.sectionTitle}>How it works</Text>
-                    <Text style={styles.instructionText}>
-                        Once you start, the camera will automatically capture frames every 2 seconds.
-                        Drive along your assigned route at a steady pace.
-                        Issues will be detected automatically by our AI system.
+                <View style={styles.tipCard}>
+                    <Text style={styles.tipTitle}>💡 Surveying Guide</Text>
+                    <Text style={styles.tipText}>
+                        Keep a safe, steady speed (20-30 km/h). The on-device and cloud AI will automatically scan and detect road surface defects.
                     </Text>
-                </Card>
+                </View>
             </ScrollView>
 
-            {/* Action Buttons */}
-            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom + spacing.md, 24) }]}>
+            {/* Bottom Action Button */}
+            <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom + spacing.sm, spacing.md) }]}>
                 <Button
-                    title="Start Survey"
+                    title="📹 Launch Camera & Start Survey"
                     onPress={handleStartSurvey}
                     loading={starting}
-                    variant="success"
-                    style={styles.footerBtn}
-                />
-                <Button
-                    title="📁 Demo Mode (Upload Video)"
-                    onPress={handleDemoMode}
-                    loading={extracting}
                     variant="primary"
-                    style={styles.footerBtn}
+                    style={styles.startSurveyBtn}
                 />
             </View>
         </View>
@@ -1409,63 +1287,204 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: colors.background,
     },
-    content: {
+    screenBody: {
         flex: 1,
-        padding: spacing.lg,
+    },
+    scrollArea: {
+        flex: 1,
+    },
+    scrollContent: {
+        padding: spacing.md,
         gap: spacing.md,
     },
-    sectionTitle: {
-        ...typography.bodyBold,
+    cardContainer: {
+        backgroundColor: colors.surface,
+        borderRadius: borderRadius.lg,
+        padding: spacing.md,
+        borderWidth: 1,
+        borderColor: colors.border,
+        ...shadows.xs,
+    },
+    cardHeading: {
+        fontSize: 14,
+        fontWeight: '700',
         color: colors.textPrimary,
         marginBottom: spacing.md,
+        letterSpacing: -0.2,
+    },
+    infoGrid: {
+        gap: spacing.sm,
     },
     infoRow: {
         flexDirection: 'row',
-        gap: spacing.xl,
-        marginBottom: spacing.sm,
+        justifyContent: 'space-between',
     },
-    infoItem: {},
+    infoCol: {
+        flex: 1,
+        paddingRight: spacing.sm,
+    },
+    divider: {
+        height: 1,
+        backgroundColor: colors.borderLight,
+        marginVertical: spacing.xs,
+    },
     infoLabel: {
-        ...typography.small,
+        fontSize: 10,
+        fontWeight: '700',
         color: colors.textMuted,
+        letterSpacing: 0.6,
+        marginBottom: 2,
     },
     infoValue: {
-        ...typography.body,
+        fontSize: 14,
+        fontWeight: '600',
         color: colors.textPrimary,
-        fontWeight: '500',
     },
-    checklistCard: {
-        marginTop: spacing.sm,
+    checkList: {
+        gap: spacing.md,
     },
     checkItem: {
         flexDirection: 'row',
-        alignItems: 'center',
-        gap: spacing.md,
-        paddingVertical: spacing.sm,
+        alignItems: 'flex-start',
     },
     checkIcon: {
-        fontSize: 20,
+        fontSize: 22,
+        marginRight: spacing.sm,
+        marginTop: 1,
     },
-    checkText: {
-        ...typography.body,
+    checkContent: {
+        flex: 1,
+    },
+    checkTitle: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: colors.textPrimary,
+        marginBottom: 1,
+    },
+    checkSub: {
+        fontSize: 12,
         color: colors.textSecondary,
+        lineHeight: 16,
     },
-    instructionsCard: {
+    tipCard: {
         backgroundColor: colors.primaryFaded,
+        borderRadius: borderRadius.lg,
+        padding: spacing.md,
         borderWidth: 1,
-        borderColor: colors.primary,
+        borderColor: 'rgba(67, 56, 202, 0.2)',
     },
-    instructionText: {
-        ...typography.caption,
+    tipTitle: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: colors.primary,
+        marginBottom: 4,
+    },
+    tipText: {
+        fontSize: 12,
         color: colors.textSecondary,
-        lineHeight: 22,
+        lineHeight: 18,
     },
-    footer: {
-        padding: spacing.lg,
+    bottomBar: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
         backgroundColor: colors.surface,
         borderTopWidth: 1,
         borderTopColor: colors.border,
-        ...shadows.sm,
+        paddingHorizontal: spacing.md,
+        paddingTop: spacing.sm,
+        ...shadows.md,
+    },
+    startSurveyBtn: {
+        minHeight: 50,
+        borderRadius: borderRadius.md,
+    },
+    emptyContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: spacing.xl,
+    },
+    emptyTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: colors.textPrimary,
+        marginBottom: 4,
+    },
+    emptySubtitle: {
+        fontSize: 13,
+        color: colors.textMuted,
+        textAlign: 'center',
+    },
+    reviewList: {
+        padding: spacing.md,
+        gap: spacing.md,
+    },
+    reviewPhotoCard: {
+        backgroundColor: colors.surface,
+        borderRadius: borderRadius.lg,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: colors.border,
+        ...shadows.xs,
+    },
+    reviewPhotoImage: {
+        width: '100%',
+        height: 190,
+        backgroundColor: '#0F172A',
+    },
+    reviewPhotoInfo: {
+        padding: spacing.md,
+    },
+    reviewPhotoHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: spacing.xs,
+    },
+    reviewPhotoIndex: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: colors.textPrimary,
+    },
+    reviewPhotoTime: {
+        fontSize: 12,
+        color: colors.textMuted,
+        fontWeight: '500',
+    },
+    reviewGpsPill: {
+        backgroundColor: colors.surfaceAlt,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 4,
+        borderRadius: borderRadius.sm,
+        alignSelf: 'flex-start',
+        marginBottom: spacing.sm,
+        borderWidth: 1,
+        borderColor: colors.borderLight,
+    },
+    reviewPhotoGps: {
+        fontSize: 12,
+        color: colors.primary,
+        fontWeight: '600',
+    },
+    deletePhotoBtn: {
+        minHeight: 40,
+        borderRadius: borderRadius.md,
+    },
+    reviewFooter: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: colors.surface,
+        borderTopWidth: 1,
+        borderTopColor: colors.border,
+        paddingHorizontal: spacing.md,
+        paddingTop: spacing.sm,
+        flexDirection: 'row',
+        gap: spacing.sm,
+        ...shadows.md,
     },
     center: {
         flex: 1,
@@ -1473,7 +1492,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     emptyText: {
-        ...typography.body,
+        fontSize: 14,
         color: colors.textMuted,
     },
     // Camera styles
@@ -1499,93 +1518,139 @@ const styles = StyleSheet.create({
     },
     statRow: {
         flexDirection: 'row',
-        flexWrap: 'wrap',
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'rgba(15, 23, 42, 0.85)',
         borderRadius: 20,
-        paddingHorizontal: spacing.lg,
-        paddingVertical: spacing.sm,
-        gap: spacing.lg,
+        paddingHorizontal: spacing.md,
+        paddingVertical: 6,
+        gap: spacing.md,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: 'rgba(255,255,255,0.12)',
         ...shadows.lg,
     },
     statItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: 4,
     },
     statIcon: {
-        fontSize: 16,
+        fontSize: 14,
     },
     statValue: {
-        ...typography.small,
         fontWeight: '800',
         color: '#fff',
-        fontSize: 14,
+        fontSize: 13,
+    },
+    statusPillsContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing.sm,
     },
     recordingBadge: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: colors.danger,
-        paddingHorizontal: spacing.lg,
-        paddingVertical: spacing.xs,
+        paddingHorizontal: spacing.md,
+        paddingVertical: 4,
         borderRadius: borderRadius.full,
-        gap: spacing.sm,
-        borderWidth: 1.5,
+        gap: 6,
+        borderWidth: 1,
         borderColor: 'rgba(255,255,255,0.3)',
     },
     recordingDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
+        width: 8,
+        height: 8,
+        borderRadius: 4,
         backgroundColor: '#fff',
     },
     recordingText: {
-        ...typography.small,
+        fontSize: 11,
         color: '#fff',
         fontWeight: '800',
-        letterSpacing: 1,
+        letterSpacing: 0.8,
+    },
+    detectionPill: {
+        paddingHorizontal: spacing.md,
+        paddingVertical: 4,
+        borderRadius: borderRadius.full,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.3)',
+    },
+    detectionPillText: {
+        fontSize: 11,
+        color: '#fff',
+        fontWeight: '800',
+        letterSpacing: 0.5,
     },
     debugGpsContainer: {
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        borderRadius: 12,
-        padding: spacing.sm,
-        marginTop: spacing.sm,
+        backgroundColor: 'rgba(0, 0, 0, 0.75)',
+        borderRadius: 10,
+        paddingHorizontal: spacing.md,
+        paddingVertical: 4,
         borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.2)',
+        alignItems: 'center',
     },
     debugGpsLabel: {
-        ...typography.small,
-        color: '#10B981',
+        fontSize: 10,
         fontWeight: '800',
-        marginBottom: 4,
+        marginBottom: 1,
     },
     debugGpsValue: {
-        ...typography.small,
         color: '#fff',
-        fontSize: 11,
-        lineHeight: 16,
+        fontSize: 10,
+        lineHeight: 14,
     },
     cameraControls: {
-        flexDirection: 'row',
-        paddingBottom: 40,
-        paddingHorizontal: spacing.lg,
-        gap: spacing.md,
-        backgroundColor: 'rgba(0,0,0,0.4)',
-        paddingTop: spacing.lg,
+        paddingHorizontal: spacing.md,
+        gap: spacing.sm,
+        backgroundColor: 'rgba(15, 23, 42, 0.75)',
+        paddingTop: spacing.md,
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
     },
-    cameraBtn: {
+    controlRow: {
+        flexDirection: 'row',
+        gap: spacing.sm,
+    },
+    controlButton: {
         flex: 1,
+        minHeight: 46,
+        borderRadius: borderRadius.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: spacing.sm,
+    },
+    controlButtonText: {
+        color: '#fff',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    autoBtnActive: {
+        backgroundColor: '#059669',
+    },
+    autoBtnInactive: {
+        backgroundColor: '#475569',
+    },
+    captureBtn: {
+        backgroundColor: '#2563EB',
+    },
+    startBtn: {
+        backgroundColor: '#10B981',
+    },
+    pauseBtn: {
+        backgroundColor: '#F59E0B',
+    },
+    reviewBtn: {
+        backgroundColor: '#6366F1',
     },
     activeDetectionBox: {
         position: 'absolute',
-        top: '40%',
+        top: '35%',
         left: '15%',
         right: '15%',
         height: 180,
-        borderWidth: 3,
+        borderWidth: 2.5,
         borderColor: '#10B981',
         borderRadius: borderRadius.md,
         backgroundColor: 'rgba(16, 185, 129, 0.15)',
@@ -1596,77 +1661,12 @@ const styles = StyleSheet.create({
     detectionLabelBadge: {
         backgroundColor: '#10B981',
         paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
+        paddingVertical: 2,
         borderRadius: borderRadius.sm,
     },
     detectionLabelText: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: 11,
         fontWeight: 'bold',
-    },
-    // Demo mode styles
-    frameGrid: {
-        padding: spacing.sm,
-        gap: spacing.sm,
-    },
-    frameThumb: {
-        flex: 1,
-        aspectRatio: 1,
-        margin: spacing.xs,
-        borderRadius: borderRadius.md,
-        overflow: 'hidden',
-        position: 'relative',
-    },
-    frameImage: {
-        width: '100%',
-        height: '100%',
-    },
-    frameIndex: {
-        position: 'absolute',
-        bottom: 4,
-        right: 4,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        color: '#fff',
-        fontSize: 10,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 4,
-        overflow: 'hidden',
-    },
-    footerBtn: {
-        marginBottom: spacing.sm,
-    },
-    // Photo Review & Delete styles
-    reviewPhotoCard: {
-        backgroundColor: colors.surface,
-        borderRadius: borderRadius.xl,
-        marginBottom: spacing.md,
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: colors.borderLight,
-        ...shadows.sm,
-    },
-    reviewPhotoImage: {
-        width: '100%',
-        height: 200,
-    },
-    reviewPhotoInfo: {
-        padding: spacing.md,
-    },
-    reviewPhotoIndex: {
-        ...typography.heading3,
-        color: colors.textPrimary,
-        marginBottom: spacing.xs,
-    },
-    reviewPhotoGps: {
-        ...typography.caption,
-        color: colors.primary,
-        fontWeight: '700',
-        marginBottom: 2,
-    },
-    reviewPhotoTime: {
-        ...typography.caption,
-        color: colors.textMuted,
-        marginBottom: spacing.xs,
     },
 });

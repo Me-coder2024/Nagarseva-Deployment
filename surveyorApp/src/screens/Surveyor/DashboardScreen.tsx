@@ -299,37 +299,45 @@ export default function DashboardScreen() {
         const isPending = item.status === 'PENDING';
 
         return (
-            <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [20 + index * 10, 0] }) }] }}>
+            <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [16 + index * 6, 0] }) }] }}>
                 <TouchableOpacity
                     onPress={() => navigation.navigate('AssignmentDetail', { assignment: item })}
-                    activeOpacity={0.8}
+                    activeOpacity={0.75}
                     style={styles.assignmentPressable}
                 >
                     <View style={[styles.assignmentCard, isCompleted && styles.completedCard]}>
                         <View style={styles.assignmentHeader}>
-                            <View style={[styles.routeIconContainer, isCompleted && { backgroundColor: colors.completedBg }]}>
+                            <View style={[styles.routeIconContainer, isCompleted && { backgroundColor: '#D1FAE5' }]}>
                                 <Text style={styles.routeIcon}>{isCompleted ? '🏆' : '📍'}</Text>
                             </View>
-                            <View style={{ flex: 1, marginRight: spacing.sm }}>
-                                <Text style={[styles.routeName, isCompleted && styles.completedText]} numberOfLines={1}>{item.route?.name}</Text>
-                                <Text style={styles.routeWard}>{item.route?.ward?.name}</Text>
+                            <View style={{ flex: 1, marginRight: spacing.xs }}>
+                                <Text style={[styles.routeName, isCompleted && styles.completedRouteName]} numberOfLines={1}>
+                                    {item.route?.name || 'Assigned Route'}
+                                </Text>
+                                <Text style={styles.routeWard} numberOfLines={1}>
+                                    {item.route?.ward?.name || 'General Ward'}
+                                </Text>
                             </View>
                             <StatusBadge status={item.status} />
                         </View>
                         
                         <View style={styles.assignmentDetails}>
                             <View style={styles.detailItem}>
-                                <Text style={styles.detailLabel}>Distance</Text>
-                                <Text style={styles.detailValue}>{item.route?.distance} km</Text>
+                                <Text style={styles.detailLabel}>DISTANCE</Text>
+                                <Text style={styles.detailValue}>{item.route?.distance ?? 0} km</Text>
                             </View>
                             <View style={styles.detailItem}>
-                                <Text style={styles.detailLabel}>Assigned</Text>
+                                <Text style={styles.detailLabel}>ASSIGNED</Text>
                                 <Text style={styles.detailValue}>
-                                    {new Date(item.assignedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                    {item.assignedAt
+                                        ? new Date(item.assignedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                                        : 'Today'}
                                 </Text>
                             </View>
-                            <View style={styles.progressBarContainer}>
-                                <View style={[styles.progressBar, { width: isCompleted ? '100%' : isPending ? '0%' : '40%' }]} />
+                            <View style={styles.detailActionItem}>
+                                <Text style={styles.detailActionText}>
+                                    {isCompleted ? 'View Results →' : 'Start Survey →'}
+                                </Text>
                             </View>
                         </View>
                     </View>
@@ -341,8 +349,20 @@ export default function DashboardScreen() {
     if (loading) {
         return (
             <View style={styles.container}>
-                <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
-                <View style={[styles.headerHero, { paddingTop: insets.top, height: 120 }]} />
+                <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+                <View style={[styles.headerHero, { paddingTop: Math.max(insets.top + spacing.sm, 24) }]}>
+                    <View style={styles.headerContent}>
+                        <View style={styles.userSection}>
+                            <View style={styles.avatar}>
+                                <Text style={styles.avatarText}>S</Text>
+                            </View>
+                            <View>
+                                <Text style={styles.greeting}>Welcome,</Text>
+                                <Text style={styles.userName}>Surveyor</Text>
+                            </View>
+                        </View>
+                    </View>
+                </View>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={colors.primary} />
                 </View>
@@ -352,48 +372,49 @@ export default function DashboardScreen() {
 
     const renderHeader = () => (
         <View style={styles.headerWrapper}>
-            <View style={[styles.headerHero, { paddingTop: insets.top + spacing.sm }]}>
+            <View style={[styles.headerHero, { paddingTop: Math.max(insets.top + spacing.xs, 16) }]}>
                 <View style={styles.headerContent}>
                     <View style={styles.userSection}>
                         <View style={styles.avatar}>
                             <Text style={styles.avatarText}>{user?.name?.charAt(0).toUpperCase() || 'S'}</Text>
                         </View>
                         <View>
-                            <Text style={styles.greeting}>Good morning,</Text>
-                            <Text style={styles.userName}>{user?.name || 'Surveyor'}</Text>
+                            <Text style={styles.greeting}>Logged in as</Text>
+                            <Text style={styles.userName} numberOfLines={1}>{user?.name || 'Surveyor'}</Text>
                         </View>
                     </View>
-                    <TouchableOpacity style={styles.logoutButton} onPress={logout}>
+                    <TouchableOpacity style={styles.logoutButton} onPress={logout} activeOpacity={0.8}>
                         <Text style={styles.logoutText}>Logout</Text>
                     </TouchableOpacity>
                 </View>
 
+                {/* Stat Cards */}
                 <View style={styles.statsContainer}>
-                    <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
-                        <View style={[styles.statIconBg, { backgroundColor: colors.pendingBg }]}>
+                    <View style={styles.statCard}>
+                        <View style={[styles.statIconBg, { backgroundColor: '#FEF3C7' }]}>
                             <Text style={styles.statIcon}>⏳</Text>
                         </View>
                         <Text style={styles.statNumber}>{stats.pending}</Text>
-                        <Text style={styles.statLabel}>Pending</Text>
+                        <Text style={styles.statLabel} numberOfLines={1}>Pending</Text>
                     </View>
-                    <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
-                        <View style={[styles.statIconBg, { backgroundColor: colors.activeBg }]}>
+                    <View style={styles.statCard}>
+                        <View style={[styles.statIconBg, { backgroundColor: '#DBEAFE' }]}>
                             <Text style={styles.statIcon}>🚀</Text>
                         </View>
                         <Text style={styles.statNumber}>{stats.active}</Text>
-                        <Text style={styles.statLabel}>Active</Text>
+                        <Text style={styles.statLabel} numberOfLines={1}>Active</Text>
                     </View>
-                    <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
-                        <View style={[styles.statIconBg, { backgroundColor: colors.completedBg }]}>
+                    <View style={styles.statCard}>
+                        <View style={[styles.statIconBg, { backgroundColor: '#D1FAE5' }]}>
                             <Text style={styles.statIcon}>✅</Text>
                         </View>
                         <Text style={styles.statNumber}>{stats.completed}</Text>
-                        <Text style={styles.statLabel}>Completed</Text>
+                        <Text style={styles.statLabel} numberOfLines={1}>Completed</Text>
                     </View>
                 </View>
             </View>
 
-            {/* Live Survey Upload Progress Card or Background Cloud Sync Status Banner */}
+            {/* Live Survey Upload Progress Card */}
             {activeUpload && !activeUpload.isCompleted && (
                 <View style={styles.activeUploadCard}>
                     <View style={styles.activeUploadHeader}>
@@ -416,6 +437,7 @@ export default function DashboardScreen() {
                             style={styles.activeSyncButton}
                             onPress={handleManualSync}
                             disabled={isSyncing}
+                            activeOpacity={0.8}
                         >
                             <Text style={styles.activeSyncButtonText}>{isSyncing ? 'Syncing...' : '⚡ Sync Now'}</Text>
                         </TouchableOpacity>
@@ -486,6 +508,7 @@ export default function DashboardScreen() {
                         style={styles.syncButton}
                         onPress={handleManualSync}
                         disabled={isSyncing}
+                        activeOpacity={0.8}
                     >
                         <Text style={styles.syncButtonText}>{isSyncing ? 'Syncing...' : 'Sync Now'}</Text>
                     </TouchableOpacity>
@@ -495,9 +518,15 @@ export default function DashboardScreen() {
             {!activeUpload && offlineCount === 0 && (
                 <View style={styles.syncedBanner}>
                     <Text style={styles.syncedIcon}>☁️</Text>
-                    <Text style={styles.syncedText}>Cloud Sync Active • All photos & survey data uploaded</Text>
+                    <Text style={styles.syncedText}>Cloud Sync Active • All data uploaded</Text>
                 </View>
             )}
+
+            {/* Filter Tabs */}
+            <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionTitle}>Route Assignments</Text>
+                <Text style={styles.sectionCountBadge}>{filteredAssignments.length}</Text>
+            </View>
 
             <View style={styles.tabsContainer}>
                 {(['all', 'pending', 'active', 'completed'] as FilterTab[]).map(tab => (
@@ -505,6 +534,7 @@ export default function DashboardScreen() {
                         key={tab}
                         style={[styles.tab, activeTab === tab && styles.activeTab]}
                         onPress={() => setActiveTab(tab)}
+                        activeOpacity={0.7}
                     >
                         <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>
                             {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -517,14 +547,14 @@ export default function DashboardScreen() {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+            <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
             <FlatList
                 data={filteredAssignments}
                 keyExtractor={item => item.id}
                 renderItem={renderAssignment}
                 ListHeaderComponent={renderHeader}
                 style={{ flex: 1 }}
-                contentContainerStyle={[styles.listContent, { paddingBottom: Math.max(insets.bottom + 60, 90) }]}
+                contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 60, 90) }}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
@@ -537,7 +567,7 @@ export default function DashboardScreen() {
                             </View>
                             <Text style={styles.emptyText}>Unable to load assignments</Text>
                             <Text style={styles.emptySubtext}>{error}</Text>
-                            <TouchableOpacity style={styles.retryButton} onPress={() => loadAssignments()}>
+                            <TouchableOpacity style={styles.retryButton} onPress={() => loadAssignments()} activeOpacity={0.8}>
                                 <Text style={styles.retryButtonText}>Retry</Text>
                             </TouchableOpacity>
                         </View>
@@ -547,7 +577,7 @@ export default function DashboardScreen() {
                                 <Text style={styles.emptyIcon}>📭</Text>
                             </View>
                             <Text style={styles.emptyText}>No assignments found</Text>
-                            <Text style={styles.emptySubtext}>You have no route assignments. Contact your supervisor.</Text>
+                            <Text style={styles.emptySubtext}>You have no route assignments under this tab.</Text>
                         </View>
                     )
                 }
@@ -562,244 +592,267 @@ const styles = StyleSheet.create({
         backgroundColor: colors.background,
     },
     headerWrapper: {
-        marginBottom: spacing.md,
+        marginBottom: spacing.sm,
     },
     headerHero: {
         backgroundColor: colors.primary,
-        borderBottomLeftRadius: borderRadius.xxl,
-        borderBottomRightRadius: borderRadius.xxl,
+        borderBottomLeftRadius: 24,
+        borderBottomRightRadius: 24,
         paddingBottom: spacing.lg,
-        ...shadows.md,
+        ...shadows.sm,
     },
     headerContent: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        paddingHorizontal: spacing.lg,
-        paddingBottom: spacing.sm,
+        alignItems: 'center',
+        paddingHorizontal: spacing.md,
+        paddingBottom: spacing.md,
     },
     userSection: {
         flexDirection: 'row',
         alignItems: 'center',
+        flex: 1,
     },
     avatar: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: colors.surface,
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        backgroundColor: '#FFFFFF',
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: spacing.md,
-        ...shadows.sm,
+        marginRight: spacing.sm,
+        ...shadows.xs,
     },
     avatarText: {
-        ...typography.heading3,
+        fontSize: 18,
+        fontWeight: '800',
         color: colors.primary,
     },
     greeting: {
-        ...typography.small,
-        color: colors.primaryLight,
+        fontSize: 11,
+        color: 'rgba(255, 255, 255, 0.75)',
         fontWeight: '600',
     },
     userName: {
-        ...typography.heading2,
+        fontSize: 18,
+        fontWeight: '700',
         color: colors.textInverse,
     },
     logoutButton: {
-        backgroundColor: 'rgba(255,255,255,0.15)',
-        paddingVertical: spacing.xs,
+        backgroundColor: 'rgba(255, 255, 255, 0.18)',
+        paddingVertical: 6,
         paddingHorizontal: spacing.md,
         borderRadius: borderRadius.full,
     },
     logoutText: {
-        ...typography.small,
+        fontSize: 12,
         color: colors.textInverse,
         fontWeight: '700',
     },
     statsContainer: {
         flexDirection: 'row',
-        paddingHorizontal: spacing.lg,
-        marginTop: spacing.sm,
-        gap: spacing.md,
+        paddingHorizontal: spacing.md,
+        gap: spacing.sm,
     },
     statCard: {
         flex: 1,
-        padding: spacing.md,
-        borderRadius: borderRadius.xl,
+        paddingVertical: 12,
+        paddingHorizontal: 8,
+        borderRadius: 14,
         alignItems: 'center',
-        ...shadows.md,
+        backgroundColor: '#FFFFFF',
         borderWidth: 1,
-        borderColor: colors.borderLight,
+        borderColor: colors.border,
+        ...shadows.xs,
     },
     statIconBg: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: spacing.sm,
+        marginBottom: 4,
     },
     statIcon: {
-        fontSize: 20,
+        fontSize: 16,
     },
     statNumber: {
-        ...typography.heading2,
+        fontSize: 18,
+        fontWeight: '800',
         color: colors.textPrimary,
+        marginBottom: 1,
     },
     statLabel: {
-        ...typography.caption,
-        color: colors.textSecondary,
+        fontSize: 10,
+        fontWeight: '600',
+        color: colors.textMuted,
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
+    },
+    sectionHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: spacing.md,
+        marginTop: spacing.md,
+        marginBottom: spacing.xs,
+    },
+    sectionTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: colors.textPrimary,
+        letterSpacing: -0.2,
+    },
+    sectionCountBadge: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: colors.primary,
+        backgroundColor: colors.primaryFaded,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 10,
     },
     tabsContainer: {
         flexDirection: 'row',
-        paddingHorizontal: spacing.lg,
-        marginTop: spacing.xl,
-        gap: spacing.sm,
+        paddingHorizontal: spacing.md,
+        marginVertical: spacing.sm,
+        gap: 6,
     },
     tab: {
-        paddingVertical: spacing.xs,
-        paddingHorizontal: spacing.lg,
+        flex: 1,
+        paddingVertical: 7,
         alignItems: 'center',
-        borderRadius: borderRadius.full,
+        justifyContent: 'center',
+        borderRadius: borderRadius.md,
         backgroundColor: colors.surface,
         borderWidth: 1,
         borderColor: colors.border,
     },
     activeTab: {
-        backgroundColor: colors.primaryDark,
-        borderColor: colors.primaryDark,
+        backgroundColor: colors.primary,
+        borderColor: colors.primary,
     },
     tabText: {
-        ...typography.small,
+        fontSize: 12,
+        fontWeight: '600',
         color: colors.textSecondary,
     },
     activeTabText: {
         color: colors.textInverse,
-    },
-    listContent: {
-        padding: spacing.lg,
-        paddingBottom: spacing.xxxl,
+        fontWeight: '700',
     },
     assignmentPressable: {
-        marginBottom: spacing.md,
+        paddingHorizontal: spacing.md,
+        marginBottom: spacing.sm,
     },
     assignmentCard: {
         backgroundColor: colors.surface,
-        borderRadius: borderRadius.xl,
-        padding: spacing.lg,
+        borderRadius: borderRadius.lg,
+        padding: spacing.md,
         borderWidth: 1,
-        borderColor: colors.borderLight,
-        ...shadows.sm,
+        borderColor: colors.border,
+        ...shadows.xs,
     },
     completedCard: {
-        backgroundColor: colors.completedBg + '20',
-        borderColor: colors.completedBg,
+        backgroundColor: '#F0FDF4',
+        borderColor: '#BBF7D0',
     },
-    completedText: {
-        color: colors.completedText,
+    completedRouteName: {
+        color: '#065F46',
     },
     assignmentHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: spacing.md,
+        marginBottom: spacing.sm,
     },
     routeIconContainer: {
-        width: 48,
-        height: 48,
-        borderRadius: borderRadius.lg,
+        width: 40,
+        height: 40,
+        borderRadius: borderRadius.md,
         backgroundColor: colors.accent,
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: spacing.md,
+        marginRight: spacing.sm,
     },
     routeIcon: {
-        fontSize: 24,
+        fontSize: 20,
     },
     routeName: {
-        ...typography.bodyBold,
+        fontSize: 15,
+        fontWeight: '700',
         color: colors.textPrimary,
         marginBottom: 2,
     },
     routeWard: {
-        ...typography.small,
+        fontSize: 12,
         color: colors.textSecondary,
+        fontWeight: '500',
     },
     assignmentDetails: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: spacing.lg,
+        justifyContent: 'space-between',
         borderTopWidth: 1,
         borderTopColor: colors.borderLight,
-        paddingTop: spacing.md,
+        paddingTop: spacing.xs,
+        marginTop: 2,
     },
     detailItem: {
-        minWidth: 70,
+        marginRight: spacing.md,
     },
     detailLabel: {
-        ...typography.small,
+        fontSize: 9,
         color: colors.textMuted,
-        marginBottom: 2,
-        fontSize: 10,
-        textTransform: 'uppercase',
+        fontWeight: '700',
+        letterSpacing: 0.5,
+        marginBottom: 1,
     },
     detailValue: {
-        ...typography.caption,
+        fontSize: 13,
         color: colors.textPrimary,
+        fontWeight: '600',
+    },
+    detailActionItem: {
+        marginLeft: 'auto',
+    },
+    detailActionText: {
+        fontSize: 12,
         fontWeight: '700',
-    },
-    progressBarContainer: {
-        flex: 1,
-        height: 6,
-        backgroundColor: colors.borderLight,
-        borderRadius: 3,
-        overflow: 'hidden',
-    },
-    progressBar: {
-        height: '100%',
-        backgroundColor: colors.primary,
-        borderRadius: 3,
+        color: colors.primary,
     },
     emptyContainer: {
         alignItems: 'center',
-        paddingVertical: spacing.xxxl,
+        paddingVertical: spacing.xl,
+        paddingHorizontal: spacing.lg,
     },
     emptyIconBg: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
+        width: 64,
+        height: 64,
+        borderRadius: 32,
         backgroundColor: colors.surfaceAlt,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: spacing.md,
     },
     emptyIcon: {
-        fontSize: 36,
+        fontSize: 28,
     },
     emptyText: {
-        ...typography.heading3,
+        fontSize: 16,
+        fontWeight: '700',
         color: colors.textPrimary,
     },
     emptySubtext: {
-        ...typography.body,
+        fontSize: 13,
         color: colors.textMuted,
-        marginTop: spacing.xs,
+        marginTop: 4,
+        textAlign: 'center',
     },
     loadingContainer: {
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    errorContainer: {
-        backgroundColor: colors.danger + '15',
-        marginHorizontal: spacing.lg,
-        marginTop: spacing.md,
-        padding: spacing.md,
-        borderRadius: borderRadius.md,
-    },
-    errorText: {
-        ...typography.caption,
-        color: colors.danger,
-        textAlign: 'center',
+        minHeight: 200,
     },
     retryButton: {
         marginTop: spacing.md,
@@ -809,23 +862,23 @@ const styles = StyleSheet.create({
         borderRadius: borderRadius.md,
     },
     retryButtonText: {
-        ...typography.caption,
+        fontSize: 13,
+        fontWeight: '700',
         color: '#fff',
-        textAlign: 'center',
     },
     syncBanner: {
         backgroundColor: '#FEF3C7',
         borderWidth: 1,
-        borderColor: '#F59E0B',
-        borderRadius: borderRadius.lg,
+        borderColor: '#FDE68A',
+        borderRadius: borderRadius.md,
         paddingHorizontal: spacing.md,
-        paddingVertical: spacing.sm,
-        marginHorizontal: spacing.lg,
-        marginTop: spacing.md,
+        paddingVertical: 8,
+        marginHorizontal: spacing.md,
+        marginTop: spacing.sm,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        ...shadows.sm,
+        ...shadows.xs,
     },
     syncLeft: {
         flexDirection: 'row',
@@ -834,27 +887,26 @@ const styles = StyleSheet.create({
         marginRight: spacing.sm,
     },
     syncIcon: {
-        fontSize: 20,
-        marginRight: spacing.sm,
+        fontSize: 18,
+        marginRight: spacing.xs,
     },
     syncTitle: {
-        ...typography.caption,
+        fontSize: 12,
         fontWeight: '700',
         color: '#92400E',
     },
     syncSubtitle: {
-        ...typography.small,
+        fontSize: 11,
         color: '#B45309',
-        marginTop: 1,
     },
     syncButton: {
         backgroundColor: '#F59E0B',
         paddingHorizontal: spacing.md,
-        paddingVertical: 6,
-        borderRadius: borderRadius.md,
+        paddingVertical: 5,
+        borderRadius: borderRadius.sm,
     },
     syncButtonText: {
-        ...typography.small,
+        fontSize: 11,
         color: '#FFFFFF',
         fontWeight: '700',
     },
@@ -868,118 +920,116 @@ const styles = StyleSheet.create({
         borderRadius: borderRadius.md,
         paddingVertical: 6,
         paddingHorizontal: spacing.md,
-        marginHorizontal: spacing.lg,
-        marginTop: spacing.sm,
+        marginHorizontal: spacing.md,
+        marginTop: spacing.xs,
     },
     syncedIcon: {
         fontSize: 14,
         marginRight: spacing.xs,
     },
     syncedText: {
-        ...typography.small,
+        fontSize: 11,
         color: '#065F46',
         fontWeight: '600',
     },
     activeUploadCard: {
         backgroundColor: '#EFF6FF',
-        borderWidth: 1.5,
-        borderColor: '#3B82F6',
-        borderRadius: borderRadius.xl,
+        borderWidth: 1,
+        borderColor: '#BFDBFE',
+        borderRadius: borderRadius.lg,
         padding: spacing.md,
-        marginHorizontal: spacing.lg,
-        marginTop: spacing.md,
-        ...shadows.md,
+        marginHorizontal: spacing.md,
+        marginTop: spacing.sm,
+        ...shadows.xs,
     },
     activeUploadHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: spacing.sm,
+        marginBottom: spacing.xs,
     },
     activeUploadIcon: {
-        fontSize: 22,
-        marginRight: spacing.sm,
+        fontSize: 20,
+        marginRight: spacing.xs,
     },
     activeUploadTitle: {
-        ...typography.caption,
-        fontWeight: '800',
+        fontSize: 13,
+        fontWeight: '700',
         color: '#1E40AF',
-        fontSize: 14,
     },
     activeUploadRoute: {
-        ...typography.small,
+        fontSize: 11,
         color: '#3B82F6',
         fontWeight: '600',
-        marginTop: 2,
+        marginTop: 1,
     },
     activeSyncButton: {
         backgroundColor: '#2563EB',
-        paddingHorizontal: spacing.md,
-        paddingVertical: 7,
-        borderRadius: borderRadius.md,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 5,
+        borderRadius: borderRadius.sm,
     },
     activeSyncButtonText: {
-        ...typography.small,
+        fontSize: 11,
         color: '#FFFFFF',
         fontWeight: '700',
     },
     uploadProgressTrack: {
-        height: 10,
+        height: 8,
         backgroundColor: '#DBEAFE',
-        borderRadius: 5,
+        borderRadius: 4,
         overflow: 'hidden',
         marginVertical: spacing.xs,
     },
     uploadProgressFill: {
         height: '100%',
         backgroundColor: '#2563EB',
-        borderRadius: 5,
+        borderRadius: 4,
     },
     uploadCountRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginTop: spacing.xs,
+        marginTop: 2,
     },
     uploadCountText: {
-        ...typography.small,
+        fontSize: 11,
         color: '#1E40AF',
         fontWeight: '700',
     },
     uploadRemainingText: {
-        ...typography.small,
+        fontSize: 11,
         color: '#D97706',
         fontWeight: '700',
     },
     activeCompletedCard: {
         backgroundColor: '#ECFDF5',
-        borderWidth: 1.5,
-        borderColor: '#10B981',
-        borderRadius: borderRadius.xl,
+        borderWidth: 1,
+        borderColor: '#A7F3D0',
+        borderRadius: borderRadius.lg,
         padding: spacing.md,
-        marginHorizontal: spacing.lg,
-        marginTop: spacing.md,
+        marginHorizontal: spacing.md,
+        marginTop: spacing.sm,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        ...shadows.md,
+        ...shadows.xs,
     },
     completedCardTitle: {
-        ...typography.caption,
-        fontWeight: '800',
+        fontSize: 13,
+        fontWeight: '700',
         color: '#065F46',
-        fontSize: 14,
     },
     completedCardSubtitle: {
-        ...typography.small,
+        fontSize: 11,
         color: '#047857',
-        marginTop: 2,
+        marginTop: 1,
     },
     dismissButton: {
         backgroundColor: '#D1FAE5',
-        width: 32,
-        height: 32,
-        borderRadius: 16,
+        width: 28,
+        height: 28,
+        borderRadius: 14,
         alignItems: 'center',
         justifyContent: 'center',
         marginLeft: spacing.sm,
@@ -987,6 +1037,6 @@ const styles = StyleSheet.create({
     dismissButtonText: {
         color: '#065F46',
         fontWeight: '700',
-        fontSize: 14,
+        fontSize: 12,
     },
 });

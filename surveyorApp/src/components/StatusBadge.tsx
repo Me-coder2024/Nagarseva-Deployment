@@ -34,7 +34,7 @@ const statusConfig: Record<
 };
 
 export default function StatusBadge({ status }: StatusBadgeProps) {
-    const config = statusConfig[status];
+    const config = statusConfig[status] || statusConfig.PENDING;
 
     return (
         <View style={[styles.badge, { backgroundColor: config.bg }]}>
@@ -45,13 +45,14 @@ export default function StatusBadge({ status }: StatusBadgeProps) {
 
 const styles = StyleSheet.create({
     badge: {
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.xs,
+        paddingHorizontal: 10,
+        paddingVertical: 3,
         borderRadius: borderRadius.full,
         alignSelf: 'flex-start',
     },
     text: {
-        ...typography.small,
-        fontWeight: '600',
+        fontSize: 11,
+        fontWeight: '700',
+        letterSpacing: 0.3,
     },
 });

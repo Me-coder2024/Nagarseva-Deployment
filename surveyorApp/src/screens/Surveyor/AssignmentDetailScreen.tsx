@@ -79,7 +79,6 @@ export default function AssignmentDetailScreen() {
             return;
         }
 
-        // Open Google Maps with directions to the starting point
         const url = `https://www.google.com/maps/dir/?api=1&destination=${startLat},${startLon}`;
         Linking.openURL(url).catch(() => {
             Alert.alert('Error', 'Could not open Google Maps');
@@ -91,117 +90,151 @@ export default function AssignmentDetailScreen() {
             <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
             <Header
                 title="Assignment Details"
-                subtitle={assignment.route?.ward?.name}
+                subtitle={assignment.route?.name || 'Survey Assignment'}
                 onBack={() => navigation.goBack()}
             />
 
             <ScrollView
                 style={styles.content}
-                contentContainerStyle={styles.scrollContent}
+                contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(insets.bottom + 110, 130) }]}
                 showsVerticalScrollIndicator={false}
             >
                 {/* Status Card */}
-                <Card style={styles.statusCard}>
+                <View style={styles.statusCard}>
                     <View style={styles.statusHeader}>
-                        <Text style={styles.sectionTitle}>Current Status</Text>
+                        <View>
+                            <Text style={styles.statusLabel}>ASSIGNMENT STATUS</Text>
+                            <Text style={styles.statusTitle}>
+                                {currentStatus === 'PENDING'
+                                    ? 'Awaiting Acceptance'
+                                    : currentStatus === 'IN_PROGRESS'
+                                    ? 'Ready to Survey'
+                                    : 'Completed'}
+                            </Text>
+                        </View>
                         <StatusBadge status={currentStatus} />
                     </View>
-                </Card>
+                </View>
 
                 {/* Route Info Card */}
-                <Card>
-                    <Text style={styles.sectionTitle}>Route Information</Text>
+                <View style={styles.cardContainer}>
+                    <Text style={styles.sectionHeading}>Route Information</Text>
                     <View style={styles.infoGrid}>
-                        <View style={styles.infoItem}>
-                            <Text style={styles.infoLabel}>Route Name</Text>
-                            <Text style={styles.infoValue}>{assignment.route?.name}</Text>
+                        <View style={styles.infoRow}>
+                            <View style={styles.infoCol}>
+                                <Text style={styles.infoLabel}>ROUTE</Text>
+                                <Text style={styles.infoValue} numberOfLines={2}>
+                                    {assignment.route?.name || 'N/A'}
+                                </Text>
+                            </View>
+                            <View style={styles.infoCol}>
+                                <Text style={styles.infoLabel}>WARD</Text>
+                                <Text style={styles.infoValue} numberOfLines={2}>
+                                    {assignment.route?.ward?.name || 'N/A'}
+                                </Text>
+                            </View>
                         </View>
-                        <View style={styles.infoItem}>
-                            <Text style={styles.infoLabel}>Ward</Text>
-                            <Text style={styles.infoValue}>{assignment.route?.ward?.name}</Text>
-                        </View>
-                        <View style={styles.infoItem}>
-                            <Text style={styles.infoLabel}>Distance</Text>
-                            <Text style={styles.infoValue}>{assignment.route?.distance} km</Text>
-                        </View>
-                        <View style={styles.infoItem}>
-                            <Text style={styles.infoLabel}>Assigned On</Text>
-                            <Text style={styles.infoValue}>
-                                {new Date(assignment.assignedAt).toLocaleDateString('en-IN', {
-                                    day: 'numeric',
-                                    month: 'short',
-                                    year: 'numeric',
-                                })}
-                            </Text>
+
+                        <View style={styles.divider} />
+
+                        <View style={styles.infoRow}>
+                            <View style={styles.infoCol}>
+                                <Text style={styles.infoLabel}>ESTIMATED DISTANCE</Text>
+                                <Text style={styles.infoValue}>{assignment.route?.distance ?? 0} km</Text>
+                            </View>
+                            <View style={styles.infoCol}>
+                                <Text style={styles.infoLabel}>ASSIGNED DATE</Text>
+                                <Text style={styles.infoValue}>
+                                    {assignment.assignedAt
+                                        ? new Date(assignment.assignedAt).toLocaleDateString('en-IN', {
+                                              day: 'numeric',
+                                              month: 'short',
+                                              year: 'numeric',
+                                          })
+                                        : 'Today'}
+                                </Text>
+                            </View>
                         </View>
                     </View>
-                </Card>
+                </View>
 
-                {/* Map Placeholder */}
-                <Card style={styles.mapCard}>
-                    <Text style={styles.sectionTitle}>Route Preview</Text>
+                {/* Map Preview Card */}
+                <View style={styles.cardContainer}>
+                    <Text style={styles.sectionHeading}>Route Coordinates</Text>
                     <View style={styles.mapPlaceholder}>
                         <Text style={styles.mapIcon}>🗺️</Text>
-                        <Text style={styles.mapText}>Map view coming soon</Text>
-                        <Text style={styles.coordsText}>
-                            Start: {assignment.route?.startLat?.toFixed(4) ?? 'N/A'}°, {assignment.route?.startLon?.toFixed(4) ?? 'N/A'}°
-                        </Text>
-                        <Text style={styles.coordsText}>
-                            End: {assignment.route?.endLat?.toFixed(4) ?? 'N/A'}°, {assignment.route?.endLon?.toFixed(4) ?? 'N/A'}°
-                        </Text>
+                        <View style={styles.coordsContainer}>
+                            <Text style={styles.coordsBadge}>
+                                Start: {assignment.route?.startLat?.toFixed(4) ?? 'N/A'}°, {assignment.route?.startLon?.toFixed(4) ?? 'N/A'}°
+                            </Text>
+                            <Text style={styles.coordsBadge}>
+                                End: {assignment.route?.endLat?.toFixed(4) ?? 'N/A'}°, {assignment.route?.endLon?.toFixed(4) ?? 'N/A'}°
+                            </Text>
+                        </View>
                     </View>
                     <Button
-                        title="📍 Get Directions"
+                        title="📍 Open in Google Maps"
                         onPress={handleGetDirections}
-                        variant="primary"
+                        variant="secondary"
                         style={styles.directionsBtn}
                     />
-                </Card>
+                </View>
 
-                {/* Instructions Card */}
-                <Card>
-                    <Text style={styles.sectionTitle}>Survey Instructions</Text>
-                    <View style={styles.instructions}>
+                {/* Survey Instructions Card */}
+                <View style={styles.cardContainer}>
+                    <Text style={styles.sectionHeading}>Survey Checklist</Text>
+                    <View style={styles.instructionList}>
                         <View style={styles.instructionItem}>
-                            <Text style={styles.instructionNumber}>1</Text>
-                            <Text style={styles.instructionText}>
-                                Accept the assignment to begin
-                            </Text>
+                            <View style={styles.instructionNumber}>
+                                <Text style={styles.instructionNumberText}>1</Text>
+                            </View>
+                            <View style={styles.instructionBody}>
+                                <Text style={styles.instructionTitle}>Accept Assignment</Text>
+                                <Text style={styles.instructionDesc}>Confirm assignment before heading out.</Text>
+                            </View>
                         </View>
                         <View style={styles.instructionItem}>
-                            <Text style={styles.instructionNumber}>2</Text>
-                            <Text style={styles.instructionText}>
-                                Travel along the route and capture road footage
-                            </Text>
+                            <View style={styles.instructionNumber}>
+                                <Text style={styles.instructionNumberText}>2</Text>
+                            </View>
+                            <View style={styles.instructionBody}>
+                                <Text style={styles.instructionTitle}>Mount Phone on Vehicle</Text>
+                                <Text style={styles.instructionDesc}>Ensure clean camera view of the road surface.</Text>
+                            </View>
                         </View>
                         <View style={styles.instructionItem}>
-                            <Text style={styles.instructionNumber}>3</Text>
-                            <Text style={styles.instructionText}>
-                                Upload captured frames for pothole detection
-                            </Text>
+                            <View style={styles.instructionNumber}>
+                                <Text style={styles.instructionNumberText}>3</Text>
+                            </View>
+                            <View style={styles.instructionBody}>
+                                <Text style={styles.instructionTitle}>Capture & Auto-Sync</Text>
+                                <Text style={styles.instructionDesc}>AI detects potholes automatically with GPS tags.</Text>
+                            </View>
                         </View>
                     </View>
-                </Card>
+                </View>
             </ScrollView>
 
-            {/* Action Buttons */}
-            <View style={[styles.actions, { paddingBottom: insets.bottom + spacing.lg, gap: spacing.sm }]}>
+            {/* Sticky Action Footer */}
+            <View style={[styles.actionsFooter, { paddingBottom: Math.max(insets.bottom + spacing.sm, spacing.md) }]}>
                 {currentStatus === 'PENDING' ? (
                     <Button
                         title="Accept Assignment"
                         onPress={handleAccept}
                         loading={loading}
                         variant="primary"
+                        style={styles.primaryActionButton}
                     />
                 ) : currentStatus === 'IN_PROGRESS' ? (
                     <Button
-                        title="📹 Start Live Camera Survey"
+                        title="📹 Start Camera Survey"
                         onPress={handleStartSurvey}
                         variant="primary"
+                        style={styles.primaryActionButton}
                     />
                 ) : (
                     <View style={styles.completedBanner}>
-                        <Text style={styles.completedText}>✓ Survey Completed</Text>
+                        <Text style={styles.completedText}>✓ Survey Completed & Uploaded</Text>
                     </View>
                 )}
             </View>
@@ -218,108 +251,171 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     scrollContent: {
-        padding: spacing.lg,
+        padding: spacing.md,
         gap: spacing.md,
-        paddingBottom: 140,
     },
     statusCard: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
+        backgroundColor: colors.surface,
+        borderRadius: borderRadius.lg,
+        padding: spacing.md,
+        borderWidth: 1,
+        borderColor: colors.border,
+        ...shadows.xs,
     },
     statusHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        width: '100%',
     },
-    sectionTitle: {
-        ...typography.bodyBold,
+    statusLabel: {
+        fontSize: 10,
+        fontWeight: '700',
+        color: colors.textMuted,
+        letterSpacing: 0.8,
+        marginBottom: 2,
+    },
+    statusTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: colors.textPrimary,
+    },
+    cardContainer: {
+        backgroundColor: colors.surface,
+        borderRadius: borderRadius.lg,
+        padding: spacing.md,
+        borderWidth: 1,
+        borderColor: colors.border,
+        ...shadows.xs,
+    },
+    sectionHeading: {
+        fontSize: 14,
+        fontWeight: '700',
         color: colors.textPrimary,
         marginBottom: spacing.md,
+        letterSpacing: -0.2,
     },
     infoGrid: {
-        gap: spacing.md,
+        gap: spacing.sm,
     },
-    infoItem: {
+    infoRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        paddingVertical: spacing.sm,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.borderLight,
+    },
+    infoCol: {
+        flex: 1,
+        paddingRight: spacing.sm,
+    },
+    divider: {
+        height: 1,
+        backgroundColor: colors.borderLight,
+        marginVertical: spacing.xs,
     },
     infoLabel: {
-        ...typography.caption,
+        fontSize: 10,
+        fontWeight: '700',
         color: colors.textMuted,
+        letterSpacing: 0.6,
+        marginBottom: 2,
     },
     infoValue: {
-        ...typography.caption,
-        color: colors.textPrimary,
+        fontSize: 14,
         fontWeight: '600',
+        color: colors.textPrimary,
     },
-    mapCard: {},
     mapPlaceholder: {
-        height: 160,
         backgroundColor: colors.surfaceAlt,
         borderRadius: borderRadius.md,
+        padding: spacing.md,
         alignItems: 'center',
         justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: colors.borderLight,
     },
     mapIcon: {
-        fontSize: 40,
-        marginBottom: spacing.sm,
+        fontSize: 32,
+        marginBottom: spacing.xs,
     },
-    mapText: {
-        ...typography.body,
-        color: colors.textMuted,
+    coordsContainer: {
+        alignItems: 'center',
+        gap: 4,
     },
-    coordsText: {
-        ...typography.small,
-        color: colors.textMuted,
-        marginTop: spacing.xs,
+    coordsBadge: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: colors.textSecondary,
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 2,
+        borderRadius: borderRadius.sm,
+        borderWidth: 1,
+        borderColor: colors.border,
     },
     directionsBtn: {
         marginTop: spacing.md,
+        minHeight: 46,
     },
-    instructions: {
+    instructionList: {
         gap: spacing.md,
     },
     instructionItem: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        gap: spacing.md,
     },
     instructionNumber: {
         width: 24,
         height: 24,
         borderRadius: 12,
         backgroundColor: colors.primaryFaded,
-        color: colors.primary,
-        textAlign: 'center',
-        lineHeight: 24,
-        fontWeight: '600',
-        fontSize: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: spacing.sm,
+        marginTop: 2,
     },
-    instructionText: {
-        ...typography.body,
-        color: colors.textSecondary,
+    instructionNumberText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: colors.primary,
+    },
+    instructionBody: {
         flex: 1,
     },
-    actions: {
-        padding: spacing.lg,
+    instructionTitle: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: colors.textPrimary,
+        marginBottom: 1,
+    },
+    instructionDesc: {
+        fontSize: 12,
+        color: colors.textSecondary,
+        lineHeight: 16,
+    },
+    actionsFooter: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
         backgroundColor: colors.surface,
         borderTopWidth: 1,
         borderTopColor: colors.border,
-        ...shadows.sm,
+        paddingHorizontal: spacing.md,
+        paddingTop: spacing.sm,
+        ...shadows.md,
+    },
+    primaryActionButton: {
+        minHeight: 50,
+        borderRadius: borderRadius.md,
     },
     completedBanner: {
         backgroundColor: colors.completedBg,
-        padding: spacing.lg,
+        paddingVertical: spacing.md,
+        paddingHorizontal: spacing.lg,
         borderRadius: borderRadius.md,
         alignItems: 'center',
     },
     completedText: {
-        ...typography.bodyBold,
+        fontSize: 14,
+        fontWeight: '700',
         color: colors.completedText,
     },
 });
