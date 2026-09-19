@@ -53,7 +53,6 @@ export interface ReviewPhoto {
     accuracy?: number;
     capturedAt?: string;
     timestamp: string;
-    base64?: string;
     gpsTimestamp?: number;
 }
 
@@ -338,48 +337,40 @@ export default function SurveyScreen() {
             setGpsDetectionCount(prev => prev + 1);
             console.log(`[DETECTION ID: ${detectionId}] Pothole confirmed: lat=${gpsSnapshot.latitude.toFixed(6)}, lng=${gpsSnapshot.longitude.toFixed(6)}, accuracy=${gpsSnapshot.accuracy}m`);
 
-                let photoBase64: string | undefined = undefined;
-                if (PotholeDetector && PotholeDetector.getBase64) {
-                    try {
-                        photoBase64 = await PotholeDetector.getBase64(photo.path);
-                    } catch (b64e) {}
-                }
+            const newPhoto: ReviewPhoto = {
+                id: detectionId,
+                uri: photoUri,
+                latitude: gpsSnapshot.latitude,
+                longitude: gpsSnapshot.longitude,
+                accuracy: gpsSnapshot.accuracy,
+                capturedAt: gpsSnapshot.capturedAt || new Date().toISOString(),
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                gpsTimestamp: gpsSnapshot.timestamp,
+            };
 
-                const newPhoto: ReviewPhoto = {
-                    id: detectionId,
-                    uri: photoUri,
-                    base64: photoBase64,
-                    latitude: gpsSnapshot.latitude,
-                    longitude: gpsSnapshot.longitude,
-                    accuracy: gpsSnapshot.accuracy,
-                    capturedAt: gpsSnapshot.capturedAt || new Date().toISOString(),
-                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                    gpsTimestamp: gpsSnapshot.timestamp,
-                };
+            setReviewPhotos(prev => {
+                const updated = [...prev, newPhoto];
+                AsyncStorage.setItem(REVIEW_PHOTOS_KEY, JSON.stringify(updated)).catch(console.error);
+                return updated;
+            });
+            setIssuesDetected(prev => prev + 1);
 
-                setReviewPhotos(prev => {
-                    const updated = [...prev, newPhoto];
-                    AsyncStorage.setItem(REVIEW_PHOTOS_KEY, JSON.stringify(updated)).catch(console.error);
-                    return updated;
-                });
-                setIssuesDetected(prev => prev + 1);
-
-                // Auto-upload in background for Hands-Free Auto-Patrol mode
-                console.log(`[UPLOAD ID: ${detectionId}] Starting upload with GPS: lat=${newPhoto.latitude.toFixed(6)}, lng=${newPhoto.longitude.toFixed(6)}`);
-                api.reportDetection(
-                    newPhoto.uri,
-                    assignment.routeId || assignment.route?.id || 'route-1',
-                    assignment.route?.wardId || assignment.route?.ward?.id || 'ward-1',
-                    surveySessionId || '',
-                    assignment.id,
-                    newPhoto.latitude,
-                    newPhoto.longitude,
-                    detectionResult.confidence || 0.90,
-                    newPhoto.base64,
-                    newPhoto.accuracy,
-                    newPhoto.capturedAt,
-                    detectionId  // pass full detectionId through
-                ).then(res => {
+            // Auto-upload in background for Hands-Free Auto-Patrol mode
+            console.log(`[UPLOAD ID: ${detectionId}] Starting upload with GPS: lat=${newPhoto.latitude.toFixed(6)}, lng=${newPhoto.longitude.toFixed(6)}`);
+            api.reportDetection(
+                newPhoto.uri,
+                assignment.routeId || assignment.route?.id || 'route-1',
+                assignment.route?.wardId || assignment.route?.ward?.id || 'ward-1',
+                surveySessionId || '',
+                assignment.id,
+                newPhoto.latitude,
+                newPhoto.longitude,
+                detectionResult.confidence || 0.90,
+                undefined,
+                newPhoto.accuracy,
+                newPhoto.capturedAt,
+                detectionId  // pass full detectionId through
+            ).then(res => {
                     if (!res || !res.success) {
                         console.log(`[QUEUE ID: ${detectionId}] Upload failed, queuing with GPS: lat=${newPhoto.latitude}, lng=${newPhoto.longitude}`);
                         offlineQueue.enqueueBatch(
@@ -712,17 +703,9 @@ export default function SurveyScreen() {
 
             triggerDetectionFlash();
 
-            let photoBase64: string | undefined = undefined;
-            if (PotholeDetector && PotholeDetector.getBase64) {
-                try {
-                    photoBase64 = await PotholeDetector.getBase64(photo.path);
-                } catch (b64e) {}
-            }
-
             const newPhoto: ReviewPhoto = {
                 id: Date.now().toString() + Math.random().toString().slice(2, 6),
                 uri: photoUri,
-                base64: photoBase64,
                 latitude: lat,
                 longitude: lon,
                 accuracy: gpsSnapshot.accuracy,
@@ -1193,7 +1176,7 @@ export default function SurveyScreen() {
                             renderItem={({ item, index }) => (
                                 <View style={styles.reviewPhotoCard}>
                                     <Image
-                                        source={{ uri: item.base64 || item.uri }}
+                                        source={{ uri: item.uri }}
                                         style={styles.reviewPhotoImage}
                                         resizeMode="cover"
                                     />
