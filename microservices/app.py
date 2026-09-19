@@ -58,18 +58,27 @@ def resize_if_needed(img: np.ndarray, max_dim: int = 640) -> np.ndarray:
 model = None
 def load_model():
     global model
-    if os.path.exists(MODEL_PATH):
-        try:
-            candidate = YOLO(MODEL_PATH, task="detect")
-            # Exported models load lazily. Exercise inference before reporting ready.
-            with torch.no_grad():
-                candidate(np.zeros((640, 640, 3), dtype=np.uint8), imgsz=640, device="cpu", verbose=False)
-            model = candidate
-            logger.info("Custom Model Loaded Successfully.")
-            return True
-        except Exception as e:
-            logger.error(f"Error loading model: {e}")
-    return False
+    model_file = None
+    if os.path.exists(MODEL_PATH) and os.path.getsize(MODEL_PATH) > 1024:
+        model_file = str(MODEL_PATH)
+    elif os.path.exists(BASE_DIR / 'model' / 'temp.pt') and os.path.getsize(BASE_DIR / 'model' / 'temp.pt') > 1024:
+        model_file = str(BASE_DIR / 'model' / 'temp.pt')
+    elif os.path.exists(BASE_DIR / 'yolov8n.pt'):
+        model_file = str(BASE_DIR / 'yolov8n.pt')
+    else:
+        model_file = 'yolov8n.pt'
+    
+    try:
+        candidate = YOLO(model_file, task="detect")
+        # Exported models load lazily. Exercise inference before reporting ready.
+        with torch.no_grad():
+            candidate(np.zeros((640, 640, 3), dtype=np.uint8), imgsz=640, device="cpu", verbose=False)
+        model = candidate
+        logger.info(f"YOLO Model Loaded Successfully from {model_file}.")
+        return True
+    except Exception as e:
+        logger.error(f"Error loading model from {model_file}: {e}")
+        return False
 
 model_ready = load_model()
 import threading

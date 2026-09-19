@@ -133,25 +133,37 @@ class OfflineQueueManager {
     }
 
     async syncQueue(
-        uploadFn: (item: OfflineQueueItem) => Promise<{ success: boolean; httpStatus?: number; message?: string }>
+        uploadFn: (item: OfflineQueueItem) => Promise<{ success: boolean; httpStatus?: number; message?: string }>,
+        force: boolean = false
     ): Promise<{ synced: number; remaining: number; failed: number }> {
-        // Prevent concurrent processing
+        // Prevent concurrent processing unless forcing
         if (this.isProcessingQueue) {
             this.log('Queue already processing, skipping duplicate sync');
             return { synced: 0, remaining: 0, failed: 0 };
         }
 
+        if (force) {
+            this.isPaused = false;
+            this.pauseReason = undefined;
+        }
+
         // Check if queue is paused (e.g., due to auth error)
-        if (this.isPaused) {
+        if (this.isPaused && !force) {
             this.log('Queue paused', { reason: this.pauseReason });
             return { synced: 0, remaining: 0, failed: 0 };
         }
 
-        // Check network connectivity
-        const netInfo = await NetInfo.fetch();
-        if (!netInfo.isConnected) {
-            this.log('Device offline, skipping sync');
-            return { synced: 0, remaining: 0, failed: 0 };
+        // Check network connectivity (skip check if force sync is requested)
+        if (!force) {
+            try {
+                const netInfo = await NetInfo.fetch();
+                if (netInfo.isConnected === false) {
+                    this.log('Device offline, skipping sync');
+                    return { synced: 0, remaining: 0, failed: 0 };
+                }
+            } catch (e) {
+                // Ignore NetInfo failure and proceed with attempt
+            }
         }
 
         this.isProcessingQueue = true;
@@ -162,7 +174,7 @@ class OfflineQueueManager {
                 return { synced: 0, remaining: 0, failed: 0 };
             }
 
-            this.log('Processing queue', { itemCount: currentQueue.length });
+            this.log('Processing queue', { itemCount: currentQueue.length, force });
 
             let syncedCount = 0;
             let failedCount = 0;
@@ -174,15 +186,22 @@ class OfflineQueueManager {
                     continue;
                 }
 
-                // Skip permanently failed items
-                if (item.status === QueueItemStatus.FAILED) {
+                // If force syncing, reset retry & failure states
+                if (force) {
+                    item.status = QueueItemStatus.PENDING;
+                    item.retryCount = 0;
+                    item.nextRetryAt = undefined;
+                }
+
+                // Skip permanently failed items if not forcing
+                if (!force && item.status === QueueItemStatus.FAILED) {
                     remainingQueue.push(item);
                     failedCount++;
                     continue;
                 }
 
                 // Check if we've exceeded max retries
-                if (item.retryCount >= MAX_UPLOAD_RETRIES) {
+                if (!force && item.retryCount >= MAX_UPLOAD_RETRIES) {
                     this.log('Max retries exceeded', { id: item.id, retryCount: item.retryCount });
                     remainingQueue.push({ ...item, status: QueueItemStatus.FAILED });
                     failedCount++;
@@ -190,7 +209,7 @@ class OfflineQueueManager {
                 }
 
                 // Check if it's too early to retry (backoff)
-                if (item.nextRetryAt && item.nextRetryAt > Date.now()) {
+                if (!force && item.nextRetryAt && item.nextRetryAt > Date.now()) {
                     remainingQueue.push(item);
                     continue;
                 }

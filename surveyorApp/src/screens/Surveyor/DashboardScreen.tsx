@@ -9,6 +9,7 @@ import {
     StatusBar,
     ActivityIndicator,
     Animated,
+    Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -48,16 +49,34 @@ export default function DashboardScreen() {
             try {
                 await offlineQueue.syncQueue(async (item) => {
                     try {
-                        await api.uploadFrames(
-                            item.frames,
-                            item.routeId,
-                            item.wardId,
-                            item.surveySessionId,
-                            item.assignmentId,
-                            item.latitude,
-                            item.longitude
-                        );
-                        return { success: true };
+                        if (item.frames && item.frames.length === 1) {
+                            const r = await api.reportDetection(
+                                item.frames[0],
+                                item.routeId,
+                                item.wardId,
+                                item.surveySessionId,
+                                item.assignmentId,
+                                item.latitude,
+                                item.longitude,
+                                0.90,
+                                undefined,
+                                item.accuracy,
+                                item.capturedAt,
+                                item.id
+                            );
+                            return { success: r.success, message: r.message, httpStatus: r.httpStatus };
+                        } else {
+                            const r = await api.uploadFrames(
+                                item.frames,
+                                item.routeId,
+                                item.wardId,
+                                item.surveySessionId,
+                                item.assignmentId,
+                                item.latitude,
+                                item.longitude
+                            );
+                            return { success: r.success };
+                        }
                     } catch (e: any) {
                         return { success: false, message: e?.message };
                     }
@@ -69,6 +88,71 @@ export default function DashboardScreen() {
             }
         }
     }, []);
+
+    const handleManualSync = async () => {
+        setIsSyncing(true);
+        try {
+            await offlineQueue.resumeQueue();
+            const res = await offlineQueue.syncQueue(async (item) => {
+                try {
+                    if (item.frames && item.frames.length === 1) {
+                        const r = await api.reportDetection(
+                            item.frames[0],
+                            item.routeId,
+                            item.wardId,
+                            item.surveySessionId,
+                            item.assignmentId,
+                            item.latitude,
+                            item.longitude,
+                            0.90,
+                            undefined,
+                            item.accuracy,
+                            item.capturedAt,
+                            item.id
+                        );
+                        return { success: r.success, message: r.message, httpStatus: r.httpStatus };
+                    } else {
+                        const r = await api.uploadFrames(
+                            item.frames,
+                            item.routeId,
+                            item.wardId,
+                            item.surveySessionId,
+                            item.assignmentId,
+                            item.latitude,
+                            item.longitude
+                        );
+                        return { success: r.success };
+                    }
+                } catch (e: any) {
+                    return { success: false, message: e?.message };
+                }
+            }, true);
+
+            const remaining = await offlineQueue.getTotalPendingPhotosCount();
+            setOfflineCount(remaining);
+
+            if (res.synced > 0) {
+                Alert.alert(
+                    '✅ Sync Complete',
+                    `Successfully uploaded ${res.synced} photo(s) to server. Issues are now live on Admin Dashboard!`
+                );
+            } else if (remaining === 0) {
+                Alert.alert(
+                    '☁️ Synced',
+                    'All survey photos and assignments are fully up to date with the server.'
+                );
+            } else {
+                Alert.alert(
+                    '⚠️ Sync Incomplete',
+                    `${res.remaining} photo(s) still queued. Please check your internet connection.`
+                );
+            }
+        } catch (err: any) {
+            Alert.alert('Sync Error', err?.message || 'Failed to sync with server.');
+        } finally {
+            setIsSyncing(false);
+        }
+    };
 
     // Subscribe to queue changes and keep syncing in background
     useEffect(() => {
@@ -276,7 +360,7 @@ export default function DashboardScreen() {
                     </View>
                     <TouchableOpacity
                         style={styles.syncButton}
-                        onPress={() => performSync()}
+                        onPress={handleManualSync}
                         disabled={isSyncing}
                     >
                         <Text style={styles.syncButtonText}>{isSyncing ? 'Syncing...' : 'Sync Now'}</Text>
