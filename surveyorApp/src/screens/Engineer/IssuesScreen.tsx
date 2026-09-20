@@ -151,6 +151,28 @@ export function IssuesScreen() {
 
     const stats = getStats();
 
+    const handleDirectNavigate = (item: Issue) => {
+        if (item.latitude && item.longitude) {
+            const navUrl = `google.navigation:q=${item.latitude},${item.longitude}`;
+            const geoUrl = `geo:${item.latitude},${item.longitude}?q=${item.latitude},${item.longitude}(Pothole%20Site)`;
+            const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${item.latitude},${item.longitude}`;
+
+            Linking.canOpenURL(navUrl).then(supported => {
+                if (supported) return Linking.openURL(navUrl);
+                return Linking.canOpenURL(geoUrl).then(geoSupported => {
+                    if (geoSupported) return Linking.openURL(geoUrl);
+                    return Linking.openURL(webUrl);
+                });
+            }).catch(() => {
+                Linking.openURL(webUrl).catch(() => {
+                    Alert.alert('Error', 'Could not open Google Maps navigation');
+                });
+            });
+        } else {
+            Alert.alert('Error', 'Location coordinates not available');
+        }
+    };
+
     const renderIssueCard = ({ item }: { item: Issue }) => {
         const statusConfig = getStatusConfig(item.status);
         const typeConfig = getTypeConfig(item.type);
@@ -213,15 +235,27 @@ export function IssuesScreen() {
                         )}
                     </View>
 
-                    {item.status === 'ASSIGNED' && (
-                        <TouchableOpacity
-                            style={styles.acceptButton}
-                            onPress={() => handleAcceptIssue(item)}
-                            activeOpacity={0.7}
-                        >
-                            <Text style={styles.acceptButtonText}>Start Work</Text>
-                        </TouchableOpacity>
-                    )}
+                    <View style={styles.cardActionsRow}>
+                        {item.latitude && item.longitude && (
+                            <TouchableOpacity
+                                style={styles.cardNavButton}
+                                onPress={() => handleDirectNavigate(item)}
+                                activeOpacity={0.7}
+                            >
+                                <Text style={styles.cardNavButtonText}>🧭 Navigate</Text>
+                            </TouchableOpacity>
+                        )}
+
+                        {item.status === 'ASSIGNED' && (
+                            <TouchableOpacity
+                                style={styles.acceptButton}
+                                onPress={() => handleAcceptIssue(item)}
+                                activeOpacity={0.7}
+                            >
+                                <Text style={styles.acceptButtonText}>Start Work</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
                 </View>
             </TouchableOpacity>
         );
@@ -650,11 +684,30 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         flex: 1,
     },
+    cardActionsRow: {
+        flexDirection: 'row',
+        gap: Spacing.sm,
+        marginTop: Spacing.md,
+    },
+    cardNavButton: {
+        flex: 1,
+        backgroundColor: '#EEF2FF',
+        paddingVertical: Spacing.sm,
+        borderRadius: BorderRadius.lg,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#C7D2FE',
+    },
+    cardNavButtonText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
+    },
     acceptButton: {
+        flex: 1,
         backgroundColor: Colors.success,
         paddingVertical: Spacing.sm,
         borderRadius: BorderRadius.lg,
-        marginTop: Spacing.md,
         alignItems: 'center',
     },
     acceptButtonText: {

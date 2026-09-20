@@ -55,6 +55,7 @@ export interface Issue {
     surveySessionId?: string;
     routeId?: string;
     imageUrl?: string;
+    fixImageUrl?: string;
     createdAt: string;
     ward?: Ward;
     route?: Route;

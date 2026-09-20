@@ -47,6 +47,8 @@ export function IssueDetailScreen() {
     const [isLoading, setIsLoading] = useState(false);
     const [showFixModal, setShowFixModal] = useState(false);
     const [fixImage, setFixImage] = useState<{ uri: string; fileName: string } | null>(null);
+    const [showCompareModal, setShowCompareModal] = useState(false);
+    const [compareTab, setCompareTab] = useState<'SIDE_BY_SIDE' | 'BEFORE' | 'AFTER'>('SIDE_BY_SIDE');
 
     const statusConfig = getStatusConfig(issue.status);
     const typeConfig = getTypeConfig(issue.type);
@@ -182,11 +184,27 @@ export function IssueDetailScreen() {
         }
     };
 
+    // 2.2 Turn-by-Turn Navigation with Google Maps
     const handleGetDirections = () => {
         if (issue.latitude && issue.longitude) {
-            const url = `https://www.google.com/maps/dir/?api=1&destination=${issue.latitude},${issue.longitude}`;
-            Linking.openURL(url).catch(() => {
-                Alert.alert('Error', 'Could not open Google Maps');
+            const navUrl = `google.navigation:q=${issue.latitude},${issue.longitude}`;
+            const geoUrl = `geo:${issue.latitude},${issue.longitude}?q=${issue.latitude},${issue.longitude}(Pothole%20Site)`;
+            const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${issue.latitude},${issue.longitude}`;
+
+            Linking.canOpenURL(navUrl).then(supported => {
+                if (supported) {
+                    return Linking.openURL(navUrl);
+                }
+                return Linking.canOpenURL(geoUrl).then(geoSupported => {
+                    if (geoSupported) {
+                        return Linking.openURL(geoUrl);
+                    }
+                    return Linking.openURL(webUrl);
+                });
+            }).catch(() => {
+                Linking.openURL(webUrl).catch(() => {
+                    Alert.alert('Error', 'Could not open Google Maps navigation');
+                });
             });
         } else {
             Alert.alert('Error', 'Location coordinates not available');
@@ -371,6 +389,69 @@ export function IssueDetailScreen() {
                         </View>
                     </View>
 
+                    {/* Before & After Photo Comparison Card */}
+                    {(issue.imageUrl || issue.fixImageUrl || fixImage?.uri) && (
+                        <View style={styles.infoCard}>
+                            <View style={styles.cardHeaderWithAction}>
+                                <Text style={styles.cardTitle}>🔄 Before & After Verification</Text>
+                                <TouchableOpacity
+                                    style={styles.compareHeaderButton}
+                                    onPress={() => setShowCompareModal(true)}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={styles.compareHeaderButtonText}>🔍 Compare</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.beforeAfterRow}>
+                                {/* Before Photo */}
+                                <View style={styles.beforeAfterCol}>
+                                    <View style={styles.beforeBadge}>
+                                        <Text style={styles.beforeBadgeText}>🔴 BEFORE</Text>
+                                    </View>
+                                    {issue.imageUrl ? (
+                                        <Image
+                                            source={{ uri: issue.imageUrl }}
+                                            style={styles.beforeAfterThumb}
+                                            resizeMode="cover"
+                                        />
+                                    ) : (
+                                        <View style={styles.beforeAfterPlaceholder}>
+                                            <Text style={styles.beforeAfterPlaceholderText}>No image</Text>
+                                        </View>
+                                    )}
+                                    <Text style={styles.beforeAfterDate}>
+                                        {new Date(issue.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                    </Text>
+                                </View>
+
+                                {/* After Photo */}
+                                <View style={styles.beforeAfterCol}>
+                                    <View style={[styles.beforeBadge, styles.afterBadge]}>
+                                        <Text style={styles.beforeBadgeText}>🟢 AFTER</Text>
+                                    </View>
+                                    {(issue.fixImageUrl || fixImage?.uri) ? (
+                                        <Image
+                                            source={{ uri: issue.fixImageUrl || fixImage?.uri }}
+                                            style={styles.beforeAfterThumb}
+                                            resizeMode="cover"
+                                        />
+                                    ) : (
+                                        <View style={styles.beforeAfterPlaceholder}>
+                                            <Text style={{ fontSize: 22 }}>🛠️</Text>
+                                            <Text style={styles.beforeAfterPlaceholderText}>
+                                                {issue.status === 'FIXED' || issue.status === 'RESOLVED' ? 'Verified Fix' : 'Pending Fix'}
+                                            </Text>
+                                        </View>
+                                    )}
+                                    <Text style={styles.beforeAfterDate}>
+                                        {issue.status === 'FIXED' || issue.status === 'RESOLVED' ? 'Fixed' : 'In Progress'}
+                                    </Text>
+                                </View>
+                            </View>
+                        </View>
+                    )}
+
                     {/* Status Messages */}
                     {issue.status === 'FIXED' && (
                         <View style={styles.statusMessage}>
@@ -489,6 +570,110 @@ export function IssueDetailScreen() {
                                 )}
                             </TouchableOpacity>
                         </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Before & After Comparison Fullscreen Modal */}
+            <Modal
+                visible={showCompareModal}
+                animationType="fade"
+                transparent={true}
+                onRequestClose={() => setShowCompareModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.compareModalContent, { paddingBottom: Math.max(insets.bottom + 16, 24) }]}>
+                        <View style={styles.compareModalHeader}>
+                            <View>
+                                <Text style={styles.compareModalTitle}>Before & After Inspection</Text>
+                                <Text style={styles.compareModalSubtitle}>
+                                    {issue.route?.name || 'Road Segment'} • {issue.ward?.name || 'Ward'}
+                                </Text>
+                            </View>
+                            <TouchableOpacity onPress={() => setShowCompareModal(false)} style={styles.modalCloseBtn}>
+                                <Text style={styles.modalCloseText}>✕</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Comparison Tab Selector */}
+                        <View style={styles.compareTabContainer}>
+                            <TouchableOpacity
+                                style={[styles.compareTabBtn, compareTab === 'SIDE_BY_SIDE' && styles.compareTabBtnActive]}
+                                onPress={() => setCompareTab('SIDE_BY_SIDE')}
+                            >
+                                <Text style={[styles.compareTabBtnText, compareTab === 'SIDE_BY_SIDE' && styles.compareTabBtnTextActive]}>
+                                    Side-by-Side
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.compareTabBtn, compareTab === 'BEFORE' && styles.compareTabBtnActive]}
+                                onPress={() => setCompareTab('BEFORE')}
+                            >
+                                <Text style={[styles.compareTabBtnText, compareTab === 'BEFORE' && styles.compareTabBtnTextActive]}>
+                                    🔴 Before
+                                </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.compareTabBtn, compareTab === 'AFTER' && styles.compareTabBtnActive]}
+                                onPress={() => setCompareTab('AFTER')}
+                            >
+                                <Text style={[styles.compareTabBtnText, compareTab === 'AFTER' && styles.compareTabBtnTextActive]}>
+                                    🟢 After
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Main Preview Area */}
+                        <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+                            {compareTab === 'SIDE_BY_SIDE' ? (
+                                <View style={styles.sideBySideContainer}>
+                                    <View style={styles.compareCard}>
+                                        <View style={styles.beforeBadge}>
+                                            <Text style={styles.beforeBadgeText}>🔴 BEFORE: Original Defect</Text>
+                                        </View>
+                                        {issue.imageUrl ? (
+                                            <Image source={{ uri: issue.imageUrl }} style={styles.compareModalImage} resizeMode="cover" />
+                                        ) : (
+                                            <View style={styles.comparePlaceholder}><Text>No image</Text></View>
+                                        )}
+                                        <Text style={styles.compareMetaText}>Reported: {new Date(issue.createdAt).toLocaleString()}</Text>
+                                    </View>
+                                    <View style={[styles.compareCard, { marginTop: 12 }]}>
+                                        <View style={[styles.beforeBadge, styles.afterBadge]}>
+                                            <Text style={styles.beforeBadgeText}>🟢 AFTER: Repaired Road</Text>
+                                        </View>
+                                        {(issue.fixImageUrl || fixImage?.uri) ? (
+                                            <Image source={{ uri: issue.fixImageUrl || fixImage?.uri }} style={styles.compareModalImage} resizeMode="cover" />
+                                        ) : (
+                                            <View style={styles.comparePlaceholder}><Text>Repaired on site</Text></View>
+                                        )}
+                                        <Text style={styles.compareMetaText}>Status: {issue.status}</Text>
+                                    </View>
+                                </View>
+                            ) : compareTab === 'BEFORE' ? (
+                                <View style={styles.singleCompareView}>
+                                    {issue.imageUrl ? (
+                                        <Image source={{ uri: issue.imageUrl }} style={styles.fullCompareImage} resizeMode="contain" />
+                                    ) : (
+                                        <View style={styles.comparePlaceholder}><Text>No photo</Text></View>
+                                    )}
+                                    <Text style={styles.compareTimestamp}>Reported: {new Date(issue.createdAt).toLocaleString()}</Text>
+                                </View>
+                            ) : (
+                                <View style={styles.singleCompareView}>
+                                    {(issue.fixImageUrl || fixImage?.uri) ? (
+                                        <Image source={{ uri: issue.fixImageUrl || fixImage?.uri }} style={styles.fullCompareImage} resizeMode="contain" />
+                                    ) : (
+                                        <View style={styles.comparePlaceholder}><Text>Repaired on site</Text></View>
+                                    )}
+                                    <Text style={styles.compareTimestamp}>Status: {issue.status}</Text>
+                                </View>
+                            )}
+                        </ScrollView>
+
+                        <TouchableOpacity style={styles.closeCompareModalButton} onPress={() => setShowCompareModal(false)}>
+                            <Text style={styles.closeCompareModalText}>Done Reviewing</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
@@ -907,5 +1092,190 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.medium,
         color: Colors.primary,
+    },
+    cardHeaderWithAction: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: Spacing.md,
+    },
+    compareHeaderButton: {
+        backgroundColor: Colors.primaryLight || '#EEF2FF',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 4,
+        borderRadius: BorderRadius.sm,
+    },
+    compareHeaderButtonText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.primary,
+    },
+    beforeAfterRow: {
+        flexDirection: 'row',
+        gap: Spacing.md,
+    },
+    beforeAfterCol: {
+        flex: 1,
+    },
+    beforeBadge: {
+        backgroundColor: '#FEE2E2',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 3,
+        borderRadius: BorderRadius.sm,
+        alignSelf: 'flex-start',
+        marginBottom: 6,
+    },
+    afterBadge: {
+        backgroundColor: '#DCFCE7',
+    },
+    beforeBadgeText: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: Colors.foreground,
+    },
+    beforeAfterThumb: {
+        width: '100%',
+        height: 120,
+        borderRadius: BorderRadius.md,
+        backgroundColor: '#0F172A',
+    },
+    beforeAfterPlaceholder: {
+        width: '100%',
+        height: 120,
+        borderRadius: BorderRadius.md,
+        backgroundColor: '#F1F5F9',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#CBD5E1',
+        borderStyle: 'dashed',
+    },
+    beforeAfterPlaceholderText: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.muted,
+        marginTop: 4,
+    },
+    beforeAfterDate: {
+        fontSize: 11,
+        color: Colors.muted,
+        marginTop: 4,
+        textAlign: 'center',
+    },
+    compareModalContent: {
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.xl,
+        margin: Spacing.md,
+        maxHeight: '90%',
+        padding: Spacing.lg,
+        flex: 1,
+    },
+    compareModalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: Spacing.md,
+    },
+    compareModalTitle: {
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.foreground,
+    },
+    compareModalSubtitle: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.muted,
+        marginTop: 2,
+    },
+    modalCloseBtn: {
+        padding: Spacing.xs,
+    },
+    modalCloseText: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: Colors.muted,
+    },
+    compareTabContainer: {
+        flexDirection: 'row',
+        gap: Spacing.sm,
+        marginBottom: Spacing.md,
+    },
+    compareTabBtn: {
+        flex: 1,
+        paddingVertical: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: BorderRadius.md,
+        backgroundColor: '#F1F5F9',
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    compareTabBtnActive: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+    },
+    compareTabBtnText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: Colors.muted,
+    },
+    compareTabBtnTextActive: {
+        color: Colors.white,
+        fontWeight: '700',
+    },
+    sideBySideContainer: {
+        gap: Spacing.sm,
+    },
+    compareCard: {
+        backgroundColor: '#F8FAFC',
+        borderRadius: BorderRadius.md,
+        padding: Spacing.sm,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    compareModalImage: {
+        width: '100%',
+        height: 170,
+        borderRadius: BorderRadius.md,
+        backgroundColor: '#0F172A',
+        marginTop: 4,
+    },
+    compareMetaText: {
+        fontSize: 11,
+        color: Colors.muted,
+        marginTop: 4,
+    },
+    singleCompareView: {
+        alignItems: 'center',
+        paddingVertical: Spacing.md,
+    },
+    fullCompareImage: {
+        width: '100%',
+        height: 320,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: '#0F172A',
+    },
+    compareTimestamp: {
+        fontSize: 12,
+        color: Colors.muted,
+        marginTop: Spacing.sm,
+    },
+    comparePlaceholder: {
+        width: '100%',
+        height: 180,
+        backgroundColor: '#F1F5F9',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: BorderRadius.md,
+    },
+    closeCompareModalButton: {
+        backgroundColor: Colors.primary,
+        borderRadius: BorderRadius.md,
+        paddingVertical: Spacing.md,
+        alignItems: 'center',
+        marginTop: Spacing.md,
+    },
+    closeCompareModalText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
     },
 });

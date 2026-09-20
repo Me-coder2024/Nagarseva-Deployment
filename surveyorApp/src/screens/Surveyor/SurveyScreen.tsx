@@ -140,6 +140,11 @@ export default function SurveyScreen() {
     const [debugGps, setDebugGps] = useState<{ lat: number; lng: number; accuracy: number; age: number } | null>(null);
     const [gpsDetectionCount, setGpsDetectionCount] = useState(0);
 
+    // Advanced Field Features: Torch, Speed Alert & Live GPS Trail
+    const [torchEnabled, setTorchEnabled] = useState(false);
+    const [showTrailHud, setShowTrailHud] = useState(false);
+    const [gpsTrail, setGpsTrail] = useState<Array<{ lat: number; lng: number; isDetection?: boolean; time: string }>>([]);
+
     // Refs
     const camera = useRef<Camera>(null);
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1086,6 +1091,7 @@ export default function SurveyScreen() {
                     device={device}
                     isActive={true}
                     photo
+                    torch={torchEnabled ? 'on' : 'off'}
                 />
 
                 {/* Pothole Detection Flash Border */}
@@ -1101,6 +1107,15 @@ export default function SurveyScreen() {
                 <View style={styles.cameraOverlay}>
                     {/* Top Stats Bar */}
                     <View style={[styles.cameraHeader, { paddingTop: insets.top + spacing.sm }]}>
+                        {/* High Speed Warning Banner (Speed Alert > 35 km/h) */}
+                        {currentSpeed > 35 && (
+                            <View style={styles.speedWarningBanner}>
+                                <Text style={styles.speedWarningText}>
+                                    ⚠️ SLOW DOWN: {currentSpeed} km/h (Optimal Speed 15-30 km/h)
+                                </Text>
+                            </View>
+                        )}
+
                         <View style={styles.statRow}>
                             <View style={styles.statItem}>
                                 <Text style={styles.statIcon}>⏱️</Text>
@@ -1108,7 +1123,9 @@ export default function SurveyScreen() {
                             </View>
                             <View style={styles.statItem}>
                                 <Text style={styles.statIcon}>🚀</Text>
-                                <Text style={styles.statValue}>{currentSpeed} km/h</Text>
+                                <Text style={[styles.statValue, currentSpeed > 35 && { color: '#F87171' }]}>
+                                    {currentSpeed} km/h
+                                </Text>
                             </View>
                             <View style={styles.statItem}>
                                 <Text style={styles.statIcon}>📏</Text>
@@ -1122,6 +1139,29 @@ export default function SurveyScreen() {
                                 <Text style={styles.statIcon}>🕳️</Text>
                                 <Text style={styles.statValue}>{issuesDetected}</Text>
                             </View>
+                        </View>
+
+                        {/* Quick Tools Row (Torch + Live Trail HUD) */}
+                        <View style={styles.quickToolsRow}>
+                            <TouchableOpacity
+                                style={[styles.quickToolBtn, torchEnabled && styles.quickToolBtnActive]}
+                                onPress={() => setTorchEnabled(prev => !prev)}
+                                activeOpacity={0.7}
+                            >
+                                <Text style={styles.quickToolBtnText}>
+                                    {torchEnabled ? '🔦 Torch ON' : '🔦 Torch OFF'}
+                                </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.quickToolBtn, showTrailHud && styles.quickToolBtnActive]}
+                                onPress={() => setShowTrailHud(prev => !prev)}
+                                activeOpacity={0.7}
+                            >
+                                <Text style={styles.quickToolBtnText}>
+                                    🗺️ Trail HUD ({gpsTrail.length} pts)
+                                </Text>
+                            </TouchableOpacity>
                         </View>
                         
                         {/* Debug GPS Display */}
@@ -1197,6 +1237,36 @@ export default function SurveyScreen() {
                             <View style={styles.detectionLabelBadge}>
                                 <Text style={styles.detectionLabelText}>POTHOLE DETECTED</Text>
                             </View>
+                        </View>
+                    )}
+
+                    {/* Live GPS Trail HUD Overlay Card */}
+                    {showTrailHud && (
+                        <View style={styles.trailHudCard}>
+                            <View style={styles.trailHudHeader}>
+                                <Text style={styles.trailHudTitle}>📍 Live GPS Route Trail</Text>
+                                <TouchableOpacity onPress={() => setShowTrailHud(false)}>
+                                    <Text style={styles.trailHudClose}>✕</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <Text style={styles.trailHudSubtitle}>
+                                {gpsTrail.length} breadcrumb waypoints • {reviewPhotos.length} defects pinned
+                            </Text>
+                            <ScrollView style={{ maxHeight: 110 }} showsVerticalScrollIndicator={false}>
+                                {gpsTrail.slice(-6).reverse().map((pt, idx) => (
+                                    <View key={idx} style={styles.trailItem}>
+                                        <Text style={styles.trailItemIcon}>
+                                            {pt.isDetection ? '🕳️' : '🔹'}
+                                        </Text>
+                                        <Text style={styles.trailItemText}>
+                                            {pt.lat.toFixed(5)}, {pt.lng.toFixed(5)} ({pt.time})
+                                        </Text>
+                                        {pt.isDetection && (
+                                            <Text style={styles.trailDetectionTag}>Pothole</Text>
+                                        )}
+                                    </View>
+                                ))}
+                            </ScrollView>
                         </View>
                     )}
 
@@ -1822,5 +1892,104 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '700',
         letterSpacing: 0.2,
+    },
+    speedWarningBanner: {
+        backgroundColor: '#DC2626',
+        paddingHorizontal: spacing.md,
+        paddingVertical: 6,
+        borderRadius: borderRadius.md,
+        borderWidth: 1,
+        borderColor: '#FECACA',
+        ...shadows.md,
+        marginBottom: 4,
+    },
+    speedWarningText: {
+        color: '#FFFFFF',
+        fontWeight: '800',
+        fontSize: 12,
+        textAlign: 'center',
+        letterSpacing: 0.3,
+    },
+    quickToolsRow: {
+        flexDirection: 'row',
+        gap: spacing.sm,
+        justifyContent: 'center',
+    },
+    quickToolBtn: {
+        backgroundColor: 'rgba(30, 41, 59, 0.85)',
+        paddingHorizontal: spacing.md,
+        paddingVertical: 5,
+        borderRadius: borderRadius.full,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.15)',
+    },
+    quickToolBtnActive: {
+        backgroundColor: colors.primary,
+        borderColor: '#818CF8',
+    },
+    quickToolBtnText: {
+        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    trailHudCard: {
+        position: 'absolute',
+        top: '25%',
+        left: spacing.md,
+        right: spacing.md,
+        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+        borderRadius: borderRadius.lg,
+        padding: spacing.md,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+        ...shadows.lg,
+        zIndex: 90,
+    },
+    trailHudHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 2,
+    },
+    trailHudTitle: {
+        color: '#FFFFFF',
+        fontSize: 13,
+        fontWeight: '700',
+    },
+    trailHudClose: {
+        color: colors.textMuted,
+        fontSize: 16,
+        fontWeight: '700',
+        padding: 4,
+    },
+    trailHudSubtitle: {
+        color: colors.textMuted,
+        fontSize: 11,
+        marginBottom: spacing.xs,
+    },
+    trailItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 3,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+    },
+    trailItemIcon: {
+        fontSize: 12,
+        marginRight: 6,
+    },
+    trailItemText: {
+        color: '#E2E8F0',
+        fontSize: 11,
+        flex: 1,
+    },
+    trailDetectionTag: {
+        backgroundColor: '#DC2626',
+        color: '#FFFFFF',
+        fontSize: 9,
+        fontWeight: '800',
+        paddingHorizontal: 4,
+        paddingVertical: 1,
+        borderRadius: 4,
     },
 });
