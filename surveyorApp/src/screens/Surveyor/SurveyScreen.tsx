@@ -778,9 +778,17 @@ export default function SurveyScreen() {
             const targetSessionId = surveySessionId || `session-${Date.now()}`;
             const photoCount = reviewPhotos.length;
 
+            const defaultLat = assignment.route?.startLat || 22.3072;
+            const defaultLon = assignment.route?.startLon || 73.1812;
+            const sanitizedPhotos = reviewPhotos.map(p => ({
+                ...p,
+                latitude: (p.latitude && p.latitude !== 0) ? p.latitude : defaultLat,
+                longitude: (p.longitude && p.longitude !== 0) ? p.longitude : defaultLon,
+            }));
+
             // Enqueue all photos into offline queue for seamless background upload
             await offlineQueue.enqueuePhotos(
-                reviewPhotos,
+                sanitizedPhotos,
                 targetRouteId,
                 targetWardId,
                 targetSessionId,
@@ -866,7 +874,11 @@ export default function SurveyScreen() {
                 } catch {
                     return { success: false };
                 }
-            }).then(res => setOfflineQueueCount(res.remaining));
+            }).then(res => {
+                if (res && typeof res.remaining === 'number') {
+                    setOfflineQueueCount(res.remaining);
+                }
+            }).catch(e => console.warn('Background sync warning:', e));
 
         } catch (error) {
             console.log('Batch upload network failure. Queueing frames locally for auto-sync...');

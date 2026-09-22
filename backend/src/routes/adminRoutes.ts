@@ -348,34 +348,29 @@ adminRouter.post(
           .json({ success: false, message: "Invalid route ID." });
       }
 
-      // Prevent duplicate active assignment for the same surveyor+route
-      const existingActive = await prisma.routeAssignment.findFirst({
-        where: {
-          surveyorId,
-          routeId,
-          status: { in: ["PENDING", "IN_PROGRESS"] },
-        },
-      });
-
-      if (existingActive) {
-        return res.status(409).json({
-          success: false,
-          message: "Surveyor is already assigned to this route.",
-        });
-      }
-
-      // Execute atomic transaction for race condition protection
+      // Execute atomic transaction for assign / reassign
       const routeAssigned = await prisma.$transaction(async (tx) => {
-        const inTxActive = await tx.routeAssignment.findFirst({
+        const existingForRoute = await tx.routeAssignment.findFirst({
           where: {
-            surveyorId,
             routeId,
             status: { in: ["PENDING", "IN_PROGRESS"] },
           },
         });
 
-        if (inTxActive) {
-          throw new Error("ACTIVE_ASSIGNMENT_EXISTS");
+        if (existingForRoute) {
+          // If already assigned to the same surveyor, confirm assignment
+          if (existingForRoute.surveyorId === surveyorId) {
+            return existingForRoute;
+          }
+          // Re-assign: update existing active assignment to the new surveyor
+          return await tx.routeAssignment.update({
+            where: { id: existingForRoute.id },
+            data: {
+              surveyorId,
+              status: "PENDING",
+              assignedAt: new Date(),
+            },
+          });
         }
 
         return await tx.routeAssignment.create({
@@ -393,12 +388,6 @@ adminRouter.post(
         data: routeAssigned,
       });
     } catch (error: any) {
-      if (error?.message === "ACTIVE_ASSIGNMENT_EXISTS" || error?.code === "P2002") {
-        return res.status(409).json({
-          success: false,
-          message: "Surveyor is already assigned to this route.",
-        });
-      }
       console.error("Error assigning route:", error);
       return res
         .status(500)
@@ -638,19 +627,7 @@ adminRouter.post(
         });
       }
 
-      // Check if an active assignment already exists for this issue
-      const existingAssignment = await prisma.issueAssignment.findFirst({
-        where: { issueId },
-      });
-
-      if (existingAssignment || ["ASSIGNED", "IN_PROGRESS", "FIXED"].includes(issue.status)) {
-        return res.status(409).json({
-          success: false,
-          message: "This issue is already assigned to an engineer.",
-        });
-      }
-
-      // Execute atomic transaction for assignment creation and issue status update
+      // Execute atomic transaction for assignment creation or update
       await prisma.$transaction(async (tx) => {
         const inTxIssue = await tx.issue.findUnique({ where: { id: issueId } });
         if (!inTxIssue || ["RESOLVED", "REJECTED"].includes(inTxIssue.status)) {
@@ -658,13 +635,19 @@ adminRouter.post(
         }
 
         const inTxAssignment = await tx.issueAssignment.findFirst({ where: { issueId } });
-        if (inTxAssignment || ["ASSIGNED", "IN_PROGRESS", "FIXED"].includes(inTxIssue.status)) {
-          throw new Error("ALREADY_ASSIGNED");
+        if (inTxAssignment) {
+          await tx.issueAssignment.update({
+            where: { id: inTxAssignment.id },
+            data: {
+              engineerId,
+              assignedAt: new Date(),
+            },
+          });
+        } else {
+          await tx.issueAssignment.create({
+            data: { issueId, engineerId },
+          });
         }
-
-        await tx.issueAssignment.create({
-          data: { issueId, engineerId },
-        });
 
         await tx.issue.update({
           where: { id: issueId },
@@ -677,12 +660,6 @@ adminRouter.post(
         message: "Solver assigned successfully.",
       });
     } catch (error: any) {
-      if (error?.message === "ALREADY_ASSIGNED" || error?.code === "P2002") {
-        return res.status(409).json({
-          success: false,
-          message: "This issue is already assigned to an engineer.",
-        });
-      }
       if (error?.message === "TERMINAL_STATUS") {
         return res.status(400).json({
           success: false,
@@ -782,37 +759,120 @@ adminRouter.get(
   },
 );
 
+function formatIssueForAdmin(issue: any) {
+  const latestAssignment = issue.assignments?.[0];
+  const latestResolution = issue.resolutions?.[0];
+  return {
+    id: issue.id,
+    type: issue.type,
+    status: issue.status,
+    confidence: issue.confidence,
+    wardId: issue.wardId || issue.ward?.id || "",
+    wardName: issue.ward?.name || "Vadodara City",
+    routeId: issue.routeId || issue.route?.id || "",
+    routeName: issue.route?.name || "Patrol Route",
+    latitude: issue.latitude,
+    longitude: issue.longitude,
+    imageUrl: issue.imageUrl,
+    afterImageUrl: issue.afterUrl || "",
+    assignedEngineerId: latestAssignment?.engineerId || null,
+    assignedEngineerName: latestAssignment?.engineer?.name || null,
+    analysis: issue.analysis ? {
+      severity: issue.analysis.severity,
+      depthEstimateCm: issue.analysis.depthEstimateCm,
+      surfaceAreaPercent: issue.analysis.surfaceAreaPercent,
+      repairPatchClass: issue.analysis.repairPatchClass,
+      edgeRoughness: issue.analysis.edgeRoughness,
+      waterlogged: issue.analysis.waterlogged,
+      sizeClass: issue.analysis.sizeClass,
+      priorityScore: issue.analysis.priorityScore,
+      recommendations: issue.analysis.recommendations,
+    } : null,
+    resolutionAudit: latestResolution ? {
+      repairQualityScore: latestResolution.repairQualityScore,
+      qualityRating: latestResolution.qualityRating,
+      aiVerdict: latestResolution.aiVerdict,
+      approved: latestResolution.approved,
+      feedback: latestResolution.feedback,
+      isGeofenceVerified: latestResolution.isGeofenceVerified,
+      fixDistanceMeters: latestResolution.fixDistanceMeters,
+      fixLatitude: latestResolution.fixLatitude,
+      fixLongitude: latestResolution.fixLongitude,
+      sceneSimilarityScore: latestResolution.sceneSimilarityScore,
+      antiSpoofFlags: latestResolution.antiSpoofFlags,
+      isAuthenticFix: latestResolution.isAuthenticFix,
+    } : null,
+    feedback: latestResolution?.feedback || null,
+    createdAt: typeof issue.createdAt === "string" ? issue.createdAt : issue.createdAt?.toISOString(),
+    updatedAt: typeof issue.updatedAt === "string" ? issue.updatedAt : issue.updatedAt?.toISOString(),
+  };
+}
+
+// Get all issues
+adminRouter.get(
+  "/allIssues",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req, res) => {
+    try {
+      const issues = await prisma.issue.findMany({
+        include: {
+          ward: true,
+          route: true,
+          analysis: true,
+          resolutions: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+          assignments: {
+            include: { engineer: true },
+            orderBy: { assignedAt: "desc" },
+            take: 1,
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      return res.json({ success: true, data: issues.map(formatIssueForAdmin) });
+    } catch (error) {
+      console.error("Error fetching all issues:", error);
+      return res.status(500).json({ success: false, message: "Internal server error." });
+    }
+  }
+);
+
+// Get issues with optional status filter
 adminRouter.get(
   "/issues",
   requireAuth,
   requireRole("ADMIN"),
   async (req, res) => {
     const { status } = req.query;
-    if (
-      status !== "DETECTED" &&
-      status !== "ASSIGNED" &&
-      status !== "IN_PROGRESS" &&
-      status !== "FIXED" &&
-      status !== "REJECTED" &&
-      status !== "RESOLVED"
-    ) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid status." });
-    }
 
     try {
       const issues = await prisma.issue.findMany({
-        where: { status: status },
+        where: status && typeof status === "string" ? { status: status as any } : undefined,
+        include: {
+          ward: true,
+          route: true,
+          analysis: true,
+          resolutions: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+          assignments: {
+            include: { engineer: true },
+            orderBy: { assignedAt: "desc" },
+            take: 1,
+          },
+        },
         orderBy: { createdAt: "desc" },
       });
-      console.log(issues);
-      return res.json({ success: true, data: issues });
+
+      return res.json({ success: true, data: issues.map(formatIssueForAdmin) });
     } catch (error) {
       console.error("Error fetching issues:", error);
-      return res
-        .status(500)
-        .json({ success: false, message: "Internal server error." });
+      return res.status(500).json({ success: false, message: "Internal server error." });
     }
   },
 );
@@ -912,90 +972,6 @@ adminRouter.get(
       return res.json({ success: true, data: formattedEmployees });
     } catch (error) {
       console.error("Error fetching employees:", error);
-      return res
-        .status(500)
-        .json({ success: false, message: "Internal server error." });
-    }
-  },
-);
-
-// Get all issues (without status filter)
-adminRouter.get(
-  "/allIssues",
-  requireAuth,
-  requireRole("ADMIN"),
-  async (req, res) => {
-    try {
-      const issues = await prisma.issue.findMany({
-        orderBy: { createdAt: "desc" },
-        include: {
-          ward: true,
-          route: true,
-          analysis: true,
-          resolutions: {
-            orderBy: { createdAt: "desc" },
-            take: 1
-          },
-          assignments: {
-            include: {
-              engineer: true,
-            },
-            orderBy: {
-              assignedAt: "desc",
-            },
-            take: 1,
-          },
-        },
-      });
-
-      const formattedIssues = issues.map((issue) => {
-        const latestAssignment = issue.assignments[0];
-        const latestResolution = issue.resolutions[0];
-        return {
-          id: issue.id,
-          type: issue.type,
-          status: issue.status,
-          confidence: issue.confidence,
-          wardName: issue.ward?.name || "Outside Coverage Area",
-          routeId: issue.routeId,
-          routeName: issue.route?.name || "Unassigned Route",
-          latitude: issue.latitude,
-          longitude: issue.longitude,
-          imageUrl: issue.imageUrl,
-          afterImageUrl: issue.afterUrl,
-          assignedEngineerId: latestAssignment?.engineerId || null,
-          assignedEngineerName: latestAssignment?.engineer.name || null,
-          analysis: issue.analysis ? {
-            severity: issue.analysis.severity,
-            surfaceAreaPercent: issue.analysis.surfaceAreaPercent,
-            repairPatchClass: issue.analysis.repairPatchClass,
-            edgeRoughness: issue.analysis.edgeRoughness,
-            waterlogged: issue.analysis.waterlogged,
-            sizeClass: issue.analysis.sizeClass,
-            priorityScore: issue.analysis.priorityScore,
-            recommendations: issue.analysis.recommendations,
-          } : null,
-          resolutionAudit: latestResolution ? {
-            repairQualityScore: latestResolution.repairQualityScore,
-            qualityRating: latestResolution.qualityRating,
-            aiVerdict: latestResolution.aiVerdict,
-            approved: latestResolution.approved,
-            feedback: latestResolution.feedback,
-            isGeofenceVerified: latestResolution.isGeofenceVerified,
-            fixDistanceMeters: latestResolution.fixDistanceMeters,
-            fixLatitude: latestResolution.fixLatitude,
-            fixLongitude: latestResolution.fixLongitude,
-            sceneSimilarityScore: latestResolution.sceneSimilarityScore,
-            antiSpoofFlags: latestResolution.antiSpoofFlags,
-            isAuthenticFix: latestResolution.isAuthenticFix,
-          } : null,
-          createdAt: issue.createdAt.toISOString(),
-          updatedAt: issue.updatedAt.toISOString(),
-        };
-      });
-      return res.json({ success: true, data: formattedIssues });
-    } catch (error) {
-      console.error("Error fetching all issues:", error);
       return res
         .status(500)
         .json({ success: false, message: "Internal server error." });

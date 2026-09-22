@@ -48,38 +48,54 @@ class ApiService {
         return this.token;
     }
 
-    private getHeaders(isFormData = false) {
+    private async ensureToken(): Promise<string | null> {
+        if (!this.token) {
+            try {
+                this.token = await AsyncStorage.getItem('authToken');
+            } catch (e) {
+                console.warn('Failed to read authToken from storage', e);
+            }
+        }
+        return this.token;
+    }
+
+    private async getHeaders(isFormData = false): Promise<Record<string, string>> {
+        const token = await this.ensureToken();
         const headers: Record<string, string> = {};
         if (!isFormData) {
             headers['Content-Type'] = 'application/json';
         }
-        if (this.token) {
-            headers['Authorization'] = `Bearer ${this.token}`;
+        if (token) {
+            const cleanToken = token.replace(/^"|"$/g, "").trim();
+            headers['Authorization'] = `Bearer ${cleanToken}`;
         }
         return headers;
     }
 
     async get<T>(endpoint: string): Promise<T> {
+        const headers = await this.getHeaders();
         const response = await fetch(`${BASE_URL}${endpoint}`, {
             method: 'GET',
-            headers: this.getHeaders(),
+            headers,
         });
         return response.json();
     }
 
     async post<T>(endpoint: string, data?: any): Promise<T> {
+        const headers = await this.getHeaders();
         const response = await fetch(`${BASE_URL}${endpoint}`, {
             method: 'POST',
-            headers: this.getHeaders(),
+            headers,
             body: JSON.stringify(data),
         });
         return response.json();
     }
 
     async put<T>(endpoint: string, data?: any): Promise<T> {
+        const headers = await this.getHeaders();
         const response = await fetch(`${BASE_URL}${endpoint}`, {
             method: 'PUT',
-            headers: this.getHeaders(),
+            headers,
             body: data ? JSON.stringify(data) : undefined,
         });
         return response.json();
@@ -182,9 +198,10 @@ class ApiService {
         }
 
         try {
+            const headers = await this.getHeaders(true);
             const response = await fetch(`${BASE_URL}/engineer/solveIssue`, {
                 method: 'PUT',
-                headers: this.getHeaders(true),
+                headers,
                 body: formData,
             });
             return response.json();
@@ -243,9 +260,10 @@ class ApiService {
         for (const url of uploadUrls) {
             try {
                 console.log('Making fetch request to:', url);
+                const headers = await this.getHeaders(true);
                 const response = await fetch(url, {
                     method: 'POST',
-                    headers: this.getHeaders(true),
+                    headers,
                     body: formData,
                 });
 
@@ -283,9 +301,7 @@ class ApiService {
         console.log(`[FORMDATA detectionId=${resolvedDetectionId}] routeId=${routeId} wardId=${wardId} sessionId=${surverySessionId} assignmentId=${routeAssignmentId} confidence=${confidence} accuracy=${accuracy ?? 'N/A'} capturedAt=${capturedAt ?? 'N/A'}`);
         console.log(`[FORMDATA detectionId=${resolvedDetectionId}] photoUri=${photoUri.slice(-40)} hasPhotoData=${!!photoData}`);
 
-        if (!this.token) {
-            this.token = await AsyncStorage.getItem('authToken');
-        }
+        const token = await this.ensureToken();
 
         const urlsToTry = Array.from(new Set([
             `${BASE_URL}/surveyor/reportDetection`,
@@ -330,12 +346,17 @@ class ApiService {
         }
 
         for (const url of urlsToTry) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
             try {
+                const headers = await this.getHeaders(true);
                 const response = await fetch(url, {
                     method: 'POST',
-                    headers: this.getHeaders(true),
+                    headers,
                     body: formData,
+                    signal: controller.signal,
                 });
+                clearTimeout(timeoutId);
                 const result = await response.json();
                 if (response.ok && result && result.success) {
                     console.log('✅ Multipart upload succeeded at:', url);
@@ -349,8 +370,10 @@ class ApiService {
                 if (result?.message) {
                     return { success: false, message: result.message, httpStatus: response.status };
                 }
-            } catch (err) {
-                console.warn(`Multipart upload to ${url} failed:`, err);
+            } catch (err: any) {
+                clearTimeout(timeoutId);
+                const isTimeout = err?.name === 'AbortError';
+                console.warn(`Multipart upload to ${url} failed:`, isTimeout ? 'Request timed out (15s)' : err?.message || err);
             }
         }
 
@@ -369,10 +392,11 @@ class ApiService {
 
         for (const url of urlsToTry) {
             try {
+                const headers = await this.getHeaders();
                 const jsonRes = await fetch(url, {
                     method: 'POST',
                     headers: {
-                        ...this.getHeaders(),
+                        ...headers,
                         'Content-Type': 'application/json',
                     },
                     body: jsonPayload,

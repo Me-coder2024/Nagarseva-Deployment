@@ -220,6 +220,8 @@ class OfflineQueueManager {
 
             let syncedCount = 0;
             let failedCount = 0;
+            let lastErrorMessage: string | undefined = undefined;
+            let lastHttpStatus: number | undefined = undefined;
             const remainingQueue: OfflineQueueItem[] = [];
 
             for (let i = 0; i < currentQueue.length; i++) {
@@ -231,26 +233,16 @@ class OfflineQueueManager {
                     continue;
                 }
 
+                // In auto-sync or force-sync, reset any stale FAILED items so they get a chance to upload
+                if (item.status === QueueItemStatus.FAILED && (!item.nextRetryAt || item.nextRetryAt <= Date.now())) {
+                    item.status = QueueItemStatus.PENDING;
+                }
+
                 // If force syncing, reset retry & failure states
                 if (force) {
                     item.status = QueueItemStatus.PENDING;
                     item.retryCount = 0;
                     item.nextRetryAt = undefined;
-                }
-
-                // Skip permanently failed items if not forcing
-                if (!force && item.status === QueueItemStatus.FAILED) {
-                    remainingQueue.push(item);
-                    failedCount++;
-                    continue;
-                }
-
-                // Check if we've exceeded max retries
-                if (!force && (item.retryCount || 0) >= MAX_UPLOAD_RETRIES) {
-                    this.log('Max retries exceeded', { id: item.id, retryCount: item.retryCount });
-                    remainingQueue.push({ ...item, status: QueueItemStatus.FAILED });
-                    failedCount++;
-                    continue;
                 }
 
                 // Check if it's too early to retry (backoff)
@@ -273,6 +265,8 @@ class OfflineQueueManager {
                     } else {
                         const httpStatus = result?.httpStatus;
                         const errorMessage = result?.message;
+                        lastHttpStatus = httpStatus;
+                        lastErrorMessage = errorMessage;
 
                         if (httpStatus === 401) {
                             // Authentication error - pause queue
@@ -282,10 +276,10 @@ class OfflineQueueManager {
                             remainingQueue.push({ ...item, status: QueueItemStatus.PENDING, retryCount: item.retryCount || 0, httpStatus, lastError: errorMessage });
                             break; // Stop processing
                         } else if (this.isPermanentError(httpStatus)) {
-                            // Permanent error - mark as failed
-                            this.log('Permanent failure', { id: item.id, httpStatus, message: errorMessage });
-                            remainingQueue.push({ ...item, status: QueueItemStatus.FAILED, retryCount: item.retryCount || 0, httpStatus, lastError: errorMessage });
+                            // Permanent error (e.g., 400 No photo provided, 404) - drop dead item from queue
+                            this.log('Unrecoverable error, dropping dead item from queue', { id: item.id, httpStatus, message: errorMessage });
                             failedCount++;
+                            // Do NOT push to remainingQueue - discard it!
                         } else if (httpStatus === 409 && errorMessage && errorMessage.toLowerCase().includes('already exists')) {
                             // Duplicate detection - treat as success
                             this.log('Duplicate detection - treating as success', { id: item.id });
@@ -293,8 +287,13 @@ class OfflineQueueManager {
                             const currentRemaining = [...remainingQueue, ...currentQueue.slice(i + 1)];
                             await this.saveQueue(currentRemaining);
                         } else {
-                            // Retryable error - increment retry count and schedule backoff
+                            // Retryable error - check if retried too many times (3 attempts max for bad items)
                             const newRetryCount = (item.retryCount || 0) + 1;
+                            if (newRetryCount >= 3) {
+                                this.log('Dropping item exceeding retry limit', { id: item.id });
+                                failedCount++;
+                                continue;
+                            }
                             const backoffDelay = this.calculateBackoff(newRetryCount);
                             const nextRetryAt = Date.now() + backoffDelay;
 
@@ -310,8 +309,25 @@ class OfflineQueueManager {
                         }
                     }
                 } catch (error: any) {
+                    const isMissingFile = error?.message && (
+                        error.message.includes('ENOENT') ||
+                        error.message.includes('no such file') ||
+                        error.message.includes('failed to open')
+                    );
+                    if (isMissingFile) {
+                        this.log('Local photo file missing on device, dropping dead queue item', { id: item.id, error: error?.message });
+                        failedCount++;
+                        continue;
+                    }
+
                     // Network or unexpected error - retryable
+                    lastErrorMessage = error?.message;
                     const newRetryCount = (item.retryCount || 0) + 1;
+                    if (newRetryCount >= 3) {
+                        this.log('Dropping item exceeding retry limit due to network errors', { id: item.id });
+                        failedCount++;
+                        continue;
+                    }
                     const backoffDelay = this.calculateBackoff(newRetryCount);
                     const nextRetryAt = Date.now() + backoffDelay;
 
@@ -327,7 +343,7 @@ class OfflineQueueManager {
             }
 
             await this.saveQueue(remainingQueue);
-            return { synced: syncedCount, remaining: remainingQueue.length, failed: failedCount };
+            return { synced: syncedCount, remaining: remainingQueue.length, failed: failedCount, lastErrorMessage, lastHttpStatus };
         } catch (queueError) {
             this.log('Error during syncQueue execution', queueError);
             const rem = await this.getTotalPendingPhotosCount().catch(() => 0);

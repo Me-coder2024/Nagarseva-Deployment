@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { User } from '../types';
 import api from '../services/api';
+import offlineQueue from '../services/offlineQueue';
 
 export type Role = 'SURVEYOR' | 'ENGINEER' | null;
 
@@ -70,6 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 await AsyncStorage.setItem('userRole', selectedRole as string);
                 
                 api.setToken(cleanToken);
+                await offlineQueue.resumeQueue();
                 setUser(userData);
                 setRole(selectedRole);
                 return { success: true };

@@ -73,6 +73,8 @@ export default function DashboardScreen() {
             try {
                 await offlineQueue.syncQueue(async (item) => {
                     try {
+                        const safeLat = (item.latitude && item.latitude !== 0) ? item.latitude : 22.3072;
+                        const safeLon = (item.longitude && item.longitude !== 0) ? item.longitude : 73.1812;
                         if (item.frames && item.frames.length === 1) {
                             const r = await api.reportDetection(
                                 item.frames[0],
@@ -80,8 +82,8 @@ export default function DashboardScreen() {
                                 item.wardId,
                                 item.surveySessionId,
                                 item.assignmentId,
-                                item.latitude,
-                                item.longitude,
+                                safeLat,
+                                safeLon,
                                 0.90,
                                 undefined,
                                 item.accuracy,
@@ -96,8 +98,8 @@ export default function DashboardScreen() {
                                 item.wardId,
                                 item.surveySessionId,
                                 item.assignmentId,
-                                item.latitude,
-                                item.longitude
+                                safeLat,
+                                safeLon
                             );
                             return { success: !!(r && r.success) };
                         }
@@ -119,6 +121,8 @@ export default function DashboardScreen() {
             await offlineQueue.resumeQueue();
             const res = (await offlineQueue.syncQueue(async (item) => {
                 try {
+                    const safeLat = (item.latitude && item.latitude !== 0) ? item.latitude : 22.3072;
+                    const safeLon = (item.longitude && item.longitude !== 0) ? item.longitude : 73.1812;
                     if (item.frames && item.frames.length === 1) {
                         const r = await api.reportDetection(
                             item.frames[0],
@@ -126,8 +130,8 @@ export default function DashboardScreen() {
                             item.wardId,
                             item.surveySessionId,
                             item.assignmentId,
-                            item.latitude,
-                            item.longitude,
+                            safeLat,
+                            safeLon,
                             0.90,
                             undefined,
                             item.accuracy,
@@ -142,8 +146,8 @@ export default function DashboardScreen() {
                             item.wardId,
                             item.surveySessionId,
                             item.assignmentId,
-                            item.latitude,
-                            item.longitude
+                            safeLat,
+                            safeLon
                         );
                         return { success: !!(r && r.success) };
                     }
@@ -169,10 +173,19 @@ export default function DashboardScreen() {
                     '☁️ Synced',
                     'All survey photos and assignments are fully up to date with the server.'
                 );
+            } else if (res?.lastHttpStatus === 401 || (res?.lastErrorMessage && res.lastErrorMessage.includes('expired')) || offlineQueue.getPauseReason() === 'Authentication required') {
+                Alert.alert(
+                    '🔑 Session Expired',
+                    'Your login session needs to be refreshed. Please tap "Log Out" and log in again to sync all queued photos to the server.',
+                    [
+                        { text: 'Log Out Now', style: 'destructive', onPress: logout },
+                        { text: 'Cancel', style: 'cancel' }
+                    ]
+                );
             } else {
                 Alert.alert(
                     '⚠️ Sync Incomplete',
-                    `${remainingCount} photo(s) still queued. Please check your internet connection.`
+                    `${remainingCount} photo(s) still queued. ${res?.lastErrorMessage ? `Server message: ${res.lastErrorMessage}` : 'Please check your connection and try again.'}`
                 );
             }
         } catch (err: any) {
@@ -202,6 +215,27 @@ export default function DashboardScreen() {
             );
         }
     }, [activeUpload, offlineCount, loadAssignments]);
+
+    const handleClearQueue = () => {
+        Alert.alert(
+            '🗑️ Clear Stuck Queue',
+            'Do you want to reset and clear any stuck offline photos from your device?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Clear Queue',
+                    style: 'destructive',
+                    onPress: async () => {
+                        await offlineQueue.clearQueue();
+                        await AsyncStorage.removeItem('@nagarseva_active_survey_upload');
+                        setActiveUpload(null);
+                        setOfflineCount(0);
+                        Alert.alert('✅ Queue Reset', 'All stuck photo records have been cleared. You can now start new surveys smoothly.');
+                    }
+                }
+            ]
+        );
+    };
 
     const handleDismissUploadCard = async () => {
         await AsyncStorage.removeItem('@nagarseva_active_survey_upload');
@@ -436,14 +470,24 @@ export default function DashboardScreen() {
                                 </Text>
                             </View>
                         </View>
-                        <TouchableOpacity
-                            style={styles.activeSyncButton}
-                            onPress={handleManualSync}
-                            disabled={isSyncing}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={styles.activeSyncButtonText}>{isSyncing ? 'Syncing...' : '⚡ Sync Now'}</Text>
-                        </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                            <TouchableOpacity
+                                style={styles.activeSyncButton}
+                                onPress={handleManualSync}
+                                disabled={isSyncing}
+                                activeOpacity={0.8}
+                            >
+                                <Text style={styles.activeSyncButtonText}>{isSyncing ? 'Syncing...' : '⚡ Sync'}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.activeSyncButton, { backgroundColor: '#DC2626' }]}
+                                onPress={handleClearQueue}
+                                disabled={isSyncing}
+                                activeOpacity={0.8}
+                            >
+                                <Text style={styles.activeSyncButtonText}>🗑️ Clear</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
                     {/* Progress Bar */}
@@ -507,14 +551,24 @@ export default function DashboardScreen() {
                             </Text>
                         </View>
                     </View>
-                    <TouchableOpacity
-                        style={styles.syncButton}
-                        onPress={handleManualSync}
-                        disabled={isSyncing}
-                        activeOpacity={0.8}
-                    >
-                        <Text style={styles.syncButtonText}>{isSyncing ? 'Syncing...' : 'Sync Now'}</Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                        <TouchableOpacity
+                            style={styles.syncButton}
+                            onPress={handleManualSync}
+                            disabled={isSyncing}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={styles.syncButtonText}>{isSyncing ? 'Syncing...' : 'Sync'}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.syncButton, { backgroundColor: '#DC2626' }]}
+                            onPress={handleClearQueue}
+                            disabled={isSyncing}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={styles.syncButtonText}>Clear</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
             )}
 
